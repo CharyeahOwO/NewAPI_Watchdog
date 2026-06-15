@@ -86,6 +86,27 @@ const navItems = [
 
 const UPSTREAM_MODEL_VALUE = "__upstream__"
 
+function formatLocalDateTime(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value || "-"
+
+  return date.toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).replace(/\//g, "-")
+}
+
+function runStatusLabel(status: string) {
+  if (status === "running") return "运行中"
+  if (status === "ok") return "完成"
+  if (status === "failed") return "失败"
+  return "未知"
+}
+
 const rulesSchema = z.object({
   interval_seconds: z.coerce.number().int().min(10),
   per_channel_delay_seconds: z.coerce.number().min(0),
@@ -702,23 +723,24 @@ function ChannelsPage({ token, header }: ProtectedProps) {
         cell: ({ row }) => {
           const channel = row.original
           const selected = probeModels[channel.channel_id] || UPSTREAM_MODEL_VALUE
-          const models = channelModelNames(channel)
+          const options = [
+            { value: UPSTREAM_MODEL_VALUE, label: "从上游获取模型" },
+            ...channelModelNames(channel).map((model) => ({ value: model, label: model })),
+          ]
           return (
-            <select
-              className="h-9 w-56 max-w-full rounded-full border border-stone-200 bg-white px-3 text-sm text-stone-700 shadow-paper outline-none transition-colors focus:border-stone-300 focus:ring-2 focus:ring-stone-200"
+            <Combobox
+              className="w-56 max-w-full"
               value={selected}
-              onChange={(event) =>
+              onValueChange={(value) =>
                 setProbeModels((current) => ({
                   ...current,
-                  [channel.channel_id]: event.target.value,
+                  [channel.channel_id]: value,
                 }))
               }
-            >
-              <option value={UPSTREAM_MODEL_VALUE}>从上游获取模型</option>
-              {models.map((model) => (
-                <option key={model} value={model}>{model}</option>
-              ))}
-            </select>
+              options={options}
+              placeholder="选择模型"
+              searchPlaceholder="搜索模型"
+            />
           )
         },
       },
@@ -815,7 +837,7 @@ function EventsPage() {
   const events = useQuery({ queryKey: ["events"], queryFn: api.events })
   const columns = React.useMemo<ColumnDef<StatusEvent>[]>(
     () => [
-      { accessorKey: "created_at", header: "时间" },
+      { accessorKey: "created_at", header: "时间", cell: ({ row }) => formatLocalDateTime(row.original.created_at) },
       { accessorKey: "channel_id", header: "渠道" },
       { accessorKey: "current_status", header: "状态", cell: ({ row }) => <StatusBadge status={row.original.current_status} /> },
       { accessorKey: "action", header: "动作", cell: ({ row }) => row.original.action || "-" },
@@ -851,8 +873,8 @@ function RunsPage() {
   const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs })
   const columns = React.useMemo<ColumnDef<RunView>[]>(
     () => [
-      { accessorKey: "started_at", header: "开始时间" },
-      { accessorKey: "status", header: "状态" },
+      { accessorKey: "started_at", header: "开始时间", cell: ({ row }) => formatLocalDateTime(row.original.started_at) },
+      { id: "status", accessorFn: (row) => runStatusLabel(row.status), header: "状态" },
       { accessorKey: "channels_seen", header: "渠道" },
       { accessorKey: "probes_total", header: "探测" },
       { accessorKey: "probes_ok", header: "成功" },
