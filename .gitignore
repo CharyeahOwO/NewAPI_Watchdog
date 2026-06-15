@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+config.yaml
+data/
+dist/
+*.sqlite
+*.sqlite3
+*.db
+coverage.out
+.playwright-mcp/
+newapi-watchdog-dashboard.png
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo
+*.log

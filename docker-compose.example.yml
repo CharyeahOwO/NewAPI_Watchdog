@@ -1,0 +1,17 @@
+services:
+  newapi-watchdog:
+    build: .
+    container_name: newapi-watchdog
+    restart: unless-stopped
+    command: ["-config", "/app/config.yaml"]
+    ports:
+      - "8088:8088"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
+    networks:
+      - newapi
+
+networks:
+  newapi:
+    external: true

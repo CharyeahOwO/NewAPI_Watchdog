@@ -1,0 +1,90 @@
+server:
+  host: 0.0.0.0
+  port: 8088
+  title: NewAPI Channel Watchdog
+  auto_start: true
+
+auth:
+  # 首次进入后台时使用。进入 Settings 后请立刻改成随机长 token。
+  write_token: change-me
+  write_token_header: X-Watchdog-Token
+
+database:
+  sqlite_path: data/watchdog.sqlite3
+
+# 以下配置只作为首次启动种子写入本地 SQLite。
+# 之后请在后台 Settings / Rules 页面维护。
+discovery:
+  source: api
+  sqlite_path: /newapi/data/newapi.sqlite3
+  sqlite_query: SELECT id, name, type, status, models, test_model, `group`, auto_ban FROM channels
+  page_size: 500
+
+probe:
+  mode: channel
+  model_query_param: model
+  per_channel: {}
+
+newapi:
+  base_url: http://newapi:3000
+  admin_token: ""
+  admin_token_header: Authorization
+  admin_token_prefix: Bearer
+  timeout_seconds: 20
+  verify_ssl: true
+  headers: {}
+  endpoints:
+    channel_search: /api/channel/search
+    channel_list: /api/channel/
+    channel_detail: /api/channel/{id}
+    channel_test: /api/channel/test/{id}
+  enabled_status_value: 1
+  disabled_status_value: 2
+  disable_action:
+    method: PUT
+    path: /api/channel/
+    fetch_before_update: false
+    body:
+      id: "{id}"
+      status: "{disabled_status}"
+  enable_action:
+    method: PUT
+    path: /api/channel/
+    fetch_before_update: false
+    body:
+      id: "{id}"
+      status: "{enabled_status}"
+
+policy:
+  interval_seconds: 120
+  per_channel_delay_seconds: 0
+  failure_threshold: 3
+  recovery_threshold: 2
+  degraded_failure_threshold: 1
+  slow_latency_ms: 5000
+  auto_disable: true
+  auto_recover: true
+  dry_run: true
+  respect_channel_auto_ban: true
+  probe_manual_disabled: false
+  transient_error_patterns:
+    - timeout
+    - timed out
+    - connection
+    - temporarily
+    - rate limit
+    - "429"
+    - "502"
+    - "503"
+    - "504"
+  fatal_error_patterns:
+    - invalid api key
+    - incorrect api key
+    - unauthorized
+    - forbidden
+    - quota
+    - insufficient
+    - billing
+    - permission
+    - "401"
+    - "403"
