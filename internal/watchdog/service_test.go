@@ -13,6 +13,7 @@ import (
 type fakeClient struct {
 	channels []core.ChannelInfo
 	results  map[int64]core.ProbeResult
+	probe    int
 	disable  int
 	enable   int
 }
@@ -22,6 +23,7 @@ func (f *fakeClient) DiscoverChannels(ctx context.Context) ([]core.ChannelInfo, 
 }
 
 func (f *fakeClient) ProbeChannel(ctx context.Context, channel core.ChannelInfo, model string) (core.ProbeResult, error) {
+	f.probe++
 	result := f.results[channel.ID]
 	result.Model = model
 	return result, nil
@@ -78,6 +80,7 @@ func TestRunOnceAutoDisableAndRecover(t *testing.T) {
 	cfg.Policy.DryRun = false
 	cfg.Policy.FailureThreshold = 1
 	cfg.Policy.RecoveryThreshold = 1
+	cfg.Policy.RecoveryWaitSeconds = 0
 	st := newWatchdogStore(t)
 	defer st.Close()
 	client := &fakeClient{
@@ -122,6 +125,89 @@ func TestRunOnceAutoDisableAndRecover(t *testing.T) {
 	}
 	if state.Status != core.StatusHealthy || state.AutoDisabledByWatchdog {
 		t.Fatalf("expected recovered healthy state, got %#v", state)
+	}
+}
+
+func TestDiscoverOnlyDoesNotProbeChannels(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	st := newWatchdogStore(t)
+	defer st.Close()
+	client := &fakeClient{
+		channels: []core.ChannelInfo{{ID: 3, Name: "discovered", Status: "1"}},
+		results: map[int64]core.ProbeResult{
+			3: {ChannelID: 3, OK: true, LatencyMS: 20, ErrorClass: core.ErrorNone},
+		},
+	}
+	service := New(cfg, st, client)
+	result, err := service.DiscoverOnly(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ChannelsSeen != 1 || result.ProbesTotal != 0 || client.probe != 0 {
+		t.Fatalf("discover-only should not probe channels: result=%#v probes=%d", result, client.probe)
+	}
+	channels, err := st.LatestChannels(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(channels) != 1 || channels[0].ChannelID != 3 {
+		t.Fatalf("expected discovered channel to be stored, got %#v", channels)
+	}
+}
+
+func TestRunOnceSkipsChannelWhenProbeDisabled(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	disabled := false
+	cfg.Probe.PerChannel = map[string]config.ProbeTarget{
+		"4": {Enabled: &disabled},
+	}
+	st := newWatchdogStore(t)
+	defer st.Close()
+	client := &fakeClient{
+		channels: []core.ChannelInfo{{ID: 4, Name: "skipped", Status: "1"}},
+		results: map[int64]core.ProbeResult{
+			4: {ChannelID: 4, OK: true, LatencyMS: 20, ErrorClass: core.ErrorNone},
+		},
+	}
+	service := New(cfg, st, client)
+	result, err := service.RunOnce(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ChannelsSeen != 1 || result.ProbesTotal != 0 || client.probe != 0 {
+		t.Fatalf("disabled channel should be discovered but not probed: result=%#v probes=%d", result, client.probe)
+	}
+}
+
+func TestRunOnceCircuitBreaksByErrorRate(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.Policy.DryRun = false
+	cfg.Policy.FailureThreshold = 100
+	cfg.Policy.ErrorRateThreshold = 50
+	cfg.Policy.ErrorRateMinRequests = 2
+	st := newWatchdogStore(t)
+	defer st.Close()
+	client := &fakeClient{
+		channels: []core.ChannelInfo{{ID: 5, Name: "rate", Status: "1"}},
+		results: map[int64]core.ProbeResult{
+			5: {ChannelID: 5, OK: false, LatencyMS: 20, ErrorClass: core.ErrorTransient, ErrorMessage: "timeout"},
+		},
+	}
+	service := New(cfg, st, client)
+	if _, err := service.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if client.disable != 0 {
+		t.Fatalf("first failure should not satisfy minimum request count, disable=%d", client.disable)
+	}
+	if _, err := service.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if client.disable != 1 {
+		t.Fatalf("expected error-rate circuit breaker to disable once, got %d", client.disable)
 	}
 }
 

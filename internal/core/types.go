@@ -65,6 +65,7 @@ type RuntimeState struct {
 	ConsecutiveFailures    int
 	ConsecutiveSuccesses   int
 	AutoDisabledByWatchdog bool
+	LastProbeAt            string
 	LastError              string
 	LastLatencyMS          int64
 	LastHTTPStatus         int
@@ -73,8 +74,11 @@ type RuntimeState struct {
 type PolicyRules struct {
 	FailureThreshold         int
 	RecoveryThreshold        int
+	RecoveryWaitSeconds      int
 	DegradedFailureThreshold int
 	SlowLatencyMS            int64
+	ErrorRateThreshold       float64
+	ErrorRateMinRequests     int
 	AutoDisable              bool
 	AutoRecover              bool
 	RespectChannelAutoBan    bool

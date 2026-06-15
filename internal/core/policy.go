@@ -10,8 +10,11 @@ func DefaultPolicyRules() PolicyRules {
 	return PolicyRules{
 		FailureThreshold:         3,
 		RecoveryThreshold:        2,
+		RecoveryWaitSeconds:      60,
 		DegradedFailureThreshold: 1,
 		SlowLatencyMS:            5000,
+		ErrorRateThreshold:       60,
+		ErrorRateMinRequests:     10,
 		AutoDisable:              true,
 		AutoRecover:              true,
 		RespectChannelAutoBan:    true,

@@ -64,8 +64,11 @@ policy:
   per_channel_delay_seconds: 0
   failure_threshold: 3
   recovery_threshold: 2
+  recovery_wait_seconds: 60
   degraded_failure_threshold: 1
   slow_latency_ms: 5000
+  error_rate_threshold: 60
+  error_rate_min_requests: 10
   auto_disable: true
   auto_recover: true
   dry_run: true

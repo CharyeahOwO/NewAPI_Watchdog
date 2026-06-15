@@ -50,6 +50,10 @@ type loginResponse struct {
 	Initialized bool   `json:"initialized"`
 }
 
+type channelProbeSettingsRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
 func New(cfg config.Config, store *store.Store, service *watchdog.Service) (*Server, error) {
 	sub, err := fs.Sub(webDist, "webdist")
 	if err != nil {
@@ -89,6 +93,8 @@ func (s *Server) Router() http.Handler {
 			r.Put("/settings", s.putSettings)
 			r.Get("/rules", s.getRules)
 			r.Put("/rules", s.putRules)
+			r.Post("/channels/discover", s.discoverChannels)
+			r.Put("/channels/{channelID}/probe-settings", s.putChannelProbeSettings)
 			r.Post("/probe/run", s.runProbe)
 			r.Post("/channels/{channelID}/probe", s.probeChannel)
 			r.Post("/channels/{channelID}/disable", s.disableChannel)
@@ -231,6 +237,7 @@ func (s *Server) channels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.applyChannelProbeSettings(channels)
 	writeJSON(w, http.StatusOK, channels)
 }
 
@@ -331,6 +338,15 @@ func (s *Server) putRules(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, next.Policy)
 }
 
+func (s *Server) discoverChannels(w http.ResponseWriter, r *http.Request) {
+	result, err := s.service.DiscoverOnly(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) runProbe(w http.ResponseWriter, r *http.Request) {
 	result, err := s.service.RunOnce(r.Context())
 	if err != nil {
@@ -338,6 +354,43 @@ func (s *Server) runProbe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) putChannelProbeSettings(w http.ResponseWriter, r *http.Request) {
+	channelID, ok := channelIDParam(w, r)
+	if !ok {
+		return
+	}
+	var payload channelProbeSettingsRequest
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	next := s.currentConfig()
+	if next.Probe.PerChannel == nil {
+		next.Probe.PerChannel = map[string]config.ProbeTarget{}
+	}
+	key := strconv.FormatInt(channelID, 10)
+	target := next.Probe.PerChannel[key]
+	target.Enabled = &payload.Enabled
+	next.Probe.PerChannel[key] = target
+	if err := s.applyConfig(r.Context(), next); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	channels, err := s.store.LatestChannels(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	s.applyChannelProbeSettings(channels)
+	for _, channel := range channels {
+		if channel.ChannelID == channelID {
+			writeJSON(w, http.StatusOK, channel)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"channel_id": channelID, "watchdog_enabled": payload.Enabled})
 }
 
 func (s *Server) probeChannel(w http.ResponseWriter, r *http.Request) {
@@ -401,6 +454,7 @@ func (s *Server) snapshot(ctx context.Context) (store.StatusSnapshot, error) {
 	if err != nil {
 		return snapshot, err
 	}
+	s.applyChannelProbeSettings(snapshot.Channels)
 	snapshot.GeneratedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	return snapshot, nil
 }
@@ -420,6 +474,20 @@ func (s *Server) applyConfig(ctx context.Context, cfg config.Config) error {
 	s.mu.Unlock()
 	s.service.UpdateConfig(cfg)
 	return nil
+}
+
+func (s *Server) applyChannelProbeSettings(channels []store.ChannelView) {
+	cfg := s.currentConfig()
+	for index := range channels {
+		channels[index].WatchdogEnabled = true
+		if cfg.Probe.PerChannel == nil {
+			continue
+		}
+		target, ok := cfg.Probe.PerChannel[strconv.FormatInt(channels[index].ChannelID, 10)]
+		if ok && target.Enabled != nil {
+			channels[index].WatchdogEnabled = *target.Enabled
+		}
+	}
 }
 
 func channelIDParam(w http.ResponseWriter, r *http.Request) (int64, bool) {

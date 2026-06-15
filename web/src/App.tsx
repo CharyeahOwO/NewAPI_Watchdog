@@ -86,8 +86,11 @@ const rulesSchema = z.object({
   per_channel_delay_seconds: z.coerce.number().min(0),
   failure_threshold: z.coerce.number().int().min(1),
   recovery_threshold: z.coerce.number().int().min(1),
+  recovery_wait_seconds: z.coerce.number().int().min(0),
   degraded_failure_threshold: z.coerce.number().int().min(1),
   slow_latency_ms: z.coerce.number().int().min(1),
+  error_rate_threshold: z.coerce.number().min(1).max(100),
+  error_rate_min_requests: z.coerce.number().int().min(1),
   auto_disable: z.boolean(),
   auto_recover: z.boolean(),
   dry_run: z.boolean(),
@@ -104,8 +107,11 @@ const defaultRulesForm: RulesForm = {
   per_channel_delay_seconds: 0,
   failure_threshold: 3,
   recovery_threshold: 2,
+  recovery_wait_seconds: 60,
   degraded_failure_threshold: 1,
   slow_latency_ms: 5000,
+  error_rate_threshold: 60,
+  error_rate_min_requests: 10,
   auto_disable: true,
   auto_recover: true,
   dry_run: true,
@@ -176,7 +182,7 @@ function App() {
   const token = session.token
   const needsSetup = !!session.token && bootstrap.data ? !bootstrap.data.setup_completed : false
   const runMutation = useMutation({
-    mutationFn: () => api.runProbe(token, header),
+    mutationFn: () => api.discoverChannels(token, header),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["status"] })
       queryClient.invalidateQueries({ queryKey: ["channels"] })
@@ -311,7 +317,7 @@ function RunFeedback({ mutation }: { mutation: UseMutationResult<RunResult, Erro
       <Card className="mb-5 border-muted bg-muted/35">
         <CardContent className="flex items-center gap-3 p-4 text-sm text-muted-foreground">
           <RefreshCw className="h-4 w-4 animate-spin" />
-          正在向 NewAPI 拉取渠道并执行巡检。
+          正在向 NewAPI 拉取渠道信息。
         </CardContent>
       </Card>
     )
@@ -322,7 +328,7 @@ function RunFeedback({ mutation }: { mutation: UseMutationResult<RunResult, Erro
         <CardContent className="flex items-start gap-3 p-4 text-sm text-destructive">
           <CircleAlert className="mt-0.5 h-4 w-4 flex-none" />
           <div>
-            <div className="font-medium">巡检失败</div>
+            <div className="font-medium">操作失败</div>
             <div className="mt-1 break-words">{mutation.error.message}</div>
           </div>
         </CardContent>
@@ -330,14 +336,17 @@ function RunFeedback({ mutation }: { mutation: UseMutationResult<RunResult, Erro
     )
   }
   const result = mutation.data
+  const discoveryOnly = result.probes_total === 0 && result.actions_taken === 0
   return (
     <Card className="mb-5 border-emerald-200 bg-emerald-50/70">
       <CardContent className="flex items-start gap-3 p-4 text-sm text-emerald-900">
         <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none" />
         <div>
-          <div className="font-medium">巡检完成</div>
+          <div className="font-medium">{discoveryOnly ? "发现完成" : "巡检完成"}</div>
           <div className="mt-1">
-            发现 {result.channels_seen} 个渠道，探测 {result.probes_total} 次，成功 {result.probes_ok} 次，失败 {result.probes_failed} 次。
+            {discoveryOnly
+              ? `发现 ${result.channels_seen} 个渠道，未执行渠道探测。`
+              : `发现 ${result.channels_seen} 个渠道，探测 ${result.probes_total} 次，成功 ${result.probes_ok} 次，失败 ${result.probes_failed} 次。`}
           </div>
           {result.channels_seen === 0 ? <div className="mt-1">没有渠道通常表示 NewAPI 管理接口没有返回渠道，或当前管理 Token 权限不够。</div> : null}
         </div>
@@ -370,6 +379,82 @@ function LoginPage({
     }
   }, [initialized, username])
 
+  const form = (
+    <form
+      className="space-y-4"
+      onSubmit={(event) => {
+        event.preventDefault()
+        mutation.mutate()
+      }}
+    >
+      <div className="space-y-2">
+        <Label>账号</Label>
+        <Input
+          autoComplete="username"
+          value={username}
+          onChange={(event) => setUsername(event.target.value)}
+          placeholder="admin"
+        />
+      </div>
+      <div className="space-y-2">
+        <Label>密码</Label>
+        <Input
+          autoComplete={initialized ? "current-password" : "new-password"}
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          type="password"
+          placeholder={initialized ? "输入管理员密码" : "设置管理员密码"}
+        />
+      </div>
+      {mutation.error ? <p className="text-sm text-destructive">{mutation.error.message}</p> : null}
+      <Button className="w-full" disabled={!username.trim() || !password || mutation.isPending}>
+        {mutation.isPending ? "处理中" : initialized ? "登录" : "下一步"}
+      </Button>
+      {!initialized ? (
+        <div className="flex items-start gap-2 rounded-md border bg-muted/45 p-3 text-xs leading-5 text-muted-foreground">
+          <ShieldCheck className="mt-0.5 h-4 w-4 flex-none" />
+          首个账号默认拥有管理员权限。
+        </div>
+      ) : null}
+    </form>
+  )
+
+  if (!initialized) {
+    return (
+      <main className="console-shell min-h-screen px-4 py-8">
+        <section className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[280px_1fr]">
+          <aside className="rounded-lg border bg-background p-5">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-foreground text-background">
+                <Terminal className="h-4 w-4" />
+              </div>
+              <div>
+                <div className="text-sm font-semibold">NewAPI Watchdog</div>
+                <div className="text-xs text-muted-foreground">首次引导</div>
+              </div>
+            </div>
+            <div className="mt-8 space-y-2">
+              <StepItem active done={false} index="1" label="管理员账号" />
+              <StepItem active={false} done={false} index="2" label="连接 NewAPI" />
+              <StepItem active={false} done={false} index="3" label="运行策略" />
+              <StepItem active={false} done={false} index="4" label="完成" />
+            </div>
+          </aside>
+
+          <Card className="min-h-[560px]">
+            <CardHeader>
+              <CardTitle>管理员账号</CardTitle>
+              <CardDescription>{loading ? "正在读取控制台状态。" : "第一次提交的账号和密码会成为管理员账号。"}</CardDescription>
+            </CardHeader>
+            <CardContent className="max-w-xl">
+              {form}
+            </CardContent>
+          </Card>
+        </section>
+      </main>
+    )
+  }
+
   return (
     <main className="console-shell flex min-h-screen items-center justify-center px-4 py-10">
       <section className="grid w-full max-w-5xl gap-6 lg:grid-cols-[1fr_440px] lg:items-center">
@@ -379,9 +464,6 @@ function LoginPage({
             旁路健康控制台
           </div>
           <h1 className="mt-6 max-w-xl text-4xl font-semibold tracking-tight">{title}</h1>
-          <p className="mt-4 max-w-lg text-sm leading-6 text-muted-foreground">
-            登录后配置 NewAPI 地址、管理员 Token、巡检策略和自动恢复规则。首次登录会创建管理员账号，之后所有配置都在控制台完成。
-          </p>
         </div>
         <Card className="border-border/80 shadow-xl shadow-black/5">
           <CardHeader>
@@ -398,43 +480,7 @@ function LoginPage({
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form
-              className="space-y-4"
-              onSubmit={(event) => {
-                event.preventDefault()
-                mutation.mutate()
-              }}
-            >
-              <div className="space-y-2">
-                <Label>账号</Label>
-                <Input
-                  autoComplete="username"
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
-                  placeholder="admin"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>密码</Label>
-                <Input
-                  autoComplete={initialized ? "current-password" : "new-password"}
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  type="password"
-                  placeholder={initialized ? "输入管理员密码" : "设置管理员密码"}
-                />
-              </div>
-              {mutation.error ? <p className="text-sm text-destructive">{mutation.error.message}</p> : null}
-              <Button className="w-full" disabled={!username.trim() || !password || mutation.isPending}>
-                {mutation.isPending ? "处理中" : initialized ? "登录" : "创建并登录"}
-              </Button>
-              {!initialized ? (
-                <div className="flex items-start gap-2 rounded-md border bg-muted/45 p-3 text-xs leading-5 text-muted-foreground">
-                  <ShieldCheck className="mt-0.5 h-4 w-4 flex-none" />
-                  首个账号默认拥有管理员权限。后续 NewAPI 连接、巡检策略和自动动作都在登录后的设置页维护。
-                </div>
-              ) : null}
-            </form>
+            {form}
           </CardContent>
         </Card>
       </section>
@@ -546,6 +592,11 @@ function ChannelsPage({ token, header }: ProtectedProps) {
   const queryClient = useQueryClient()
   const channels = useQuery({ queryKey: ["channels"], queryFn: api.channels })
   const [action, setAction] = React.useState<{ type: "probe" | "disable" | "enable"; channel: ChannelView } | null>(null)
+  const toggleMutation = useMutation({
+    mutationFn: (payload: { channelID: number; enabled: boolean }) =>
+      api.setChannelProbeSettings(payload.channelID, payload.enabled, token, header),
+    onSuccess: () => queryClient.invalidateQueries(),
+  })
   const mutation = useMutation({
     mutationFn: async () => {
       if (!action) return null
@@ -564,9 +615,17 @@ function ChannelsPage({ token, header }: ProtectedProps) {
         accessorKey: "name",
         header: "渠道",
         cell: ({ row }) => (
-          <div>
-            <div className="font-medium">{row.original.name}</div>
-            <div className="text-xs text-muted-foreground">#{row.original.channel_id} / {row.original.group_name}</div>
+          <div className="flex items-center gap-3">
+            <Switch
+              checked={row.original.watchdog_enabled}
+              disabled={!token || toggleMutation.isPending}
+              aria-label={`${row.original.name} 自动巡检`}
+              onCheckedChange={(enabled) => toggleMutation.mutate({ channelID: row.original.channel_id, enabled })}
+            />
+            <div>
+              <div className="font-medium">{row.original.name}</div>
+              <div className="text-xs text-muted-foreground">#{row.original.channel_id} / {row.original.group_name}</div>
+            </div>
           </div>
         ),
       },
@@ -596,13 +655,14 @@ function ChannelsPage({ token, header }: ProtectedProps) {
         ),
       },
     ],
-    [],
+    [token, toggleMutation],
   )
 
   return (
     <div className="space-y-6">
       <PageHead eyebrow="渠道" title="渠道管理" description="查看渠道健康、错误和延迟，并执行手动探测、禁用、恢复操作。" />
       <DataTable columns={columns} data={channels.data || []} searchKey="name" searchPlaceholder="搜索渠道名称" />
+      {toggleMutation.error ? <p className="text-sm text-destructive">{toggleMutation.error.message}</p> : null}
       <Dialog open={!!action} onOpenChange={(open) => !open && setAction(null)}>
         <DialogContent>
           <DialogHeader>
@@ -711,34 +771,54 @@ function RulesPage({ token, header }: ProtectedProps) {
   return (
     <div className="space-y-6">
       <PageHead eyebrow="策略" title="策略配置" description="失败阈值、恢复阈值、自动动作和错误分类都在这里维护，保存后立即生效。" />
-      <Card>
-        <CardHeader>
-          <CardTitle>运行策略</CardTitle>
-          <CardDescription>建议先保持模拟运行，确认事件解释符合预期后再切到真实执行。</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form className="grid gap-5 lg:grid-cols-2" onSubmit={form.handleSubmit((values) => mutation.mutate(values))}>
+      <form className="space-y-5" onSubmit={form.handleSubmit((values) => mutation.mutate(values))}>
+        <Card>
+          <CardHeader>
+            <CardTitle>运行策略</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-5 lg:grid-cols-2">
             <NumberField label="巡检间隔（秒）" name="interval_seconds" form={form} />
             <NumberField label="单渠道延迟（秒）" name="per_channel_delay_seconds" form={form} />
-            <NumberField label="失败阈值" name="failure_threshold" form={form} />
-            <NumberField label="恢复阈值" name="recovery_threshold" form={form} />
+            <NumberField label="连续失败阈值" name="failure_threshold" form={form} />
             <NumberField label="降级阈值" name="degraded_failure_threshold" form={form} />
             <NumberField label="慢响应阈值（ms）" name="slow_latency_ms" form={form} />
+            <div />
             <SwitchField label="模拟运行" name="dry_run" form={form} />
             <SwitchField label="自动禁用" name="auto_disable" form={form} />
             <SwitchField label="自动恢复" name="auto_recover" form={form} />
             <SwitchField label="尊重渠道 auto_ban" name="respect_channel_auto_ban" form={form} />
             <SwitchField label="探测手动禁用渠道" name="probe_manual_disabled" form={form} />
-            <div />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>熔断器设置</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+            <SettingNumberField label="恢复成功阈值" name="recovery_threshold" form={form} description="半开状态下成功多少次后恢复渠道" />
+            <SettingNumberField label="恢复等待时间（秒）" name="recovery_wait_seconds" form={form} description="熔断器打开后，等待多久后尝试恢复" />
+            <SettingNumberField label="错误率阈值（%）" name="error_rate_threshold" form={form} description="错误率超过此值时打开熔断器" />
+            <SettingNumberField label="最小请求数" name="error_rate_min_requests" form={form} description="计算错误率前的最小请求数" />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>错误分类</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-5 lg:grid-cols-2">
             <TextareaField label="临时错误关键词" name="transient_error_patterns" form={form} />
             <TextareaField label="致命错误关键词" name="fatal_error_patterns" form={form} />
-            <div className="lg:col-span-2 flex justify-end">
-              <Button disabled={!token || mutation.isPending}>{mutation.isPending ? "保存中" : "保存策略"}</Button>
-            </div>
-            {mutation.error ? <p className="text-sm text-destructive lg:col-span-2">{mutation.error.message}</p> : null}
-          </form>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="outline" onClick={() => form.reset(defaultRulesForm)}>重置</Button>
+          <Button disabled={!token || mutation.isPending}>{mutation.isPending ? "保存中" : "保存策略"}</Button>
+        </div>
+        {mutation.error ? <p className="text-sm text-destructive">{mutation.error.message}</p> : null}
+      </form>
     </div>
   )
 }
@@ -869,9 +949,10 @@ function SetupWizard({ token, header, username, onDone }: { token: string; heade
             </div>
           </div>
           <div className="mt-8 space-y-2">
-            <StepItem active={step === "connection"} done={step !== "connection"} index="1" label="连接 NewAPI" />
-            <StepItem active={step === "policy"} done={step === "finish"} index="2" label="运行策略" />
-            <StepItem active={step === "finish"} done={false} index="3" label="完成" />
+            <StepItem active={false} done index="1" label="管理员账号" />
+            <StepItem active={step === "connection"} done={step !== "connection"} index="2" label="连接 NewAPI" />
+            <StepItem active={step === "policy"} done={step === "finish"} index="3" label="运行策略" />
+            <StepItem active={step === "finish"} done={false} index="4" label="完成" />
           </div>
         </aside>
 
@@ -888,7 +969,7 @@ function SetupWizard({ token, header, username, onDone }: { token: string; heade
                 <div className="flex flex-wrap justify-end gap-2">
                   <Button variant="outline" onClick={saveThenTest} disabled={runMutation.isPending || saveMutation.isPending || settings.isLoading}>
                     {runMutation.isPending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                    测试连接
+                    发现渠道
                   </Button>
                   <Button onClick={submitCurrent} disabled={saveMutation.isPending || settings.isLoading}>
                     {saveMutation.isPending ? "保存中" : "下一步"}
@@ -902,9 +983,14 @@ function SetupWizard({ token, header, username, onDone }: { token: string; heade
               <div className="space-y-6">
                 <div className="grid gap-5 lg:grid-cols-2">
                   <NumberField label="巡检间隔（秒）" name="interval_seconds" form={rulesForm} />
-                  <NumberField label="失败阈值" name="failure_threshold" form={rulesForm} />
-                  <NumberField label="恢复阈值" name="recovery_threshold" form={rulesForm} />
+                  <NumberField label="连续失败阈值" name="failure_threshold" form={rulesForm} />
                   <SwitchField label="模拟运行" name="dry_run" form={rulesForm} />
+                </div>
+                <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+                  <SettingNumberField label="恢复成功阈值" name="recovery_threshold" form={rulesForm} description="成功多少次后恢复渠道" />
+                  <SettingNumberField label="恢复等待时间（秒）" name="recovery_wait_seconds" form={rulesForm} description="等待多久后尝试恢复" />
+                  <SettingNumberField label="错误率阈值（%）" name="error_rate_threshold" form={rulesForm} description="超过后打开熔断器" />
+                  <SettingNumberField label="最小请求数" name="error_rate_min_requests" form={rulesForm} description="计算错误率前的样本数" />
                 </div>
                 <div className="flex justify-between">
                   <Button variant="outline" onClick={() => setStep("connection")}>上一步</Button>
@@ -1031,6 +1117,17 @@ function InputField({ label, name, form, type = "text", placeholder }: { label: 
 
 function NumberField(props: { label: string; name: string; form: FormLike }) {
   return <InputField {...props} type="number" />
+}
+
+function SettingNumberField({ label, name, form, description }: { label: string; name: string; form: FormLike; description: string }) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <Input type="number" {...form.register(name)} />
+      <p className="text-xs leading-5 text-muted-foreground">{description}</p>
+      {form.formState.errors[name] ? <p className="text-xs text-destructive">{String(form.formState.errors[name]?.message)}</p> : null}
+    </div>
+  )
 }
 
 function TextareaField({ label, name, form }: { label: string; name: string; form: FormLike }) {

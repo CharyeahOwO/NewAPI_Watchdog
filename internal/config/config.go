@@ -87,8 +87,11 @@ type PolicyConfig struct {
 	PerChannelDelaySeconds   float64  `json:"per_channel_delay_seconds" yaml:"per_channel_delay_seconds"`
 	FailureThreshold         int      `json:"failure_threshold" yaml:"failure_threshold"`
 	RecoveryThreshold        int      `json:"recovery_threshold" yaml:"recovery_threshold"`
+	RecoveryWaitSeconds      int      `json:"recovery_wait_seconds" yaml:"recovery_wait_seconds"`
 	DegradedFailureThreshold int      `json:"degraded_failure_threshold" yaml:"degraded_failure_threshold"`
 	SlowLatencyMS            int64    `json:"slow_latency_ms" yaml:"slow_latency_ms"`
+	ErrorRateThreshold       float64  `json:"error_rate_threshold" yaml:"error_rate_threshold"`
+	ErrorRateMinRequests     int      `json:"error_rate_min_requests" yaml:"error_rate_min_requests"`
 	AutoDisable              bool     `json:"auto_disable" yaml:"auto_disable"`
 	AutoRecover              bool     `json:"auto_recover" yaml:"auto_recover"`
 	DryRun                   bool     `json:"dry_run" yaml:"dry_run"`
@@ -161,8 +164,11 @@ func Default() Config {
 			IntervalSeconds:          120,
 			FailureThreshold:         rules.FailureThreshold,
 			RecoveryThreshold:        rules.RecoveryThreshold,
+			RecoveryWaitSeconds:      rules.RecoveryWaitSeconds,
 			DegradedFailureThreshold: rules.DegradedFailureThreshold,
 			SlowLatencyMS:            rules.SlowLatencyMS,
+			ErrorRateThreshold:       rules.ErrorRateThreshold,
+			ErrorRateMinRequests:     rules.ErrorRateMinRequests,
 			AutoDisable:              rules.AutoDisable,
 			AutoRecover:              rules.AutoRecover,
 			DryRun:                   true,
@@ -220,8 +226,11 @@ func (p PolicyConfig) Rules() core.PolicyRules {
 	return core.PolicyRules{
 		FailureThreshold:         p.FailureThreshold,
 		RecoveryThreshold:        p.RecoveryThreshold,
+		RecoveryWaitSeconds:      p.RecoveryWaitSeconds,
 		DegradedFailureThreshold: p.DegradedFailureThreshold,
 		SlowLatencyMS:            p.SlowLatencyMS,
+		ErrorRateThreshold:       p.ErrorRateThreshold,
+		ErrorRateMinRequests:     p.ErrorRateMinRequests,
 		AutoDisable:              p.AutoDisable,
 		AutoRecover:              p.AutoRecover,
 		RespectChannelAutoBan:    p.RespectChannelAutoBan,

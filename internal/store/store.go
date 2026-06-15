@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/newapi-tools/newapi-channel-watchdog/internal/config"
 	"github.com/newapi-tools/newapi-channel-watchdog/internal/core"
@@ -31,6 +32,7 @@ type ChannelView struct {
 	GroupName              string             `json:"group_name"`
 	AutoBan                *bool              `json:"auto_ban"`
 	NewAPIDisabled         bool               `json:"newapi_disabled"`
+	WatchdogEnabled        bool               `json:"watchdog_enabled"`
 	AutoDisabledByWatchdog bool               `json:"auto_disabled_by_watchdog"`
 	ConsecutiveFailures    int                `json:"consecutive_failures"`
 	ConsecutiveSuccesses   int                `json:"consecutive_successes"`
@@ -305,7 +307,7 @@ func (s *Store) RuntimeState(ctx context.Context, channelID int64) (core.Runtime
 	row := s.db.QueryRowContext(ctx, `
 SELECT channel_id, watchdog_status, consecutive_failures, consecutive_successes,
 	auto_disabled_by_watchdog, COALESCE(last_error, ''), COALESCE(last_latency_ms, 0),
-	COALESCE(last_http_status, 0)
+	COALESCE(last_http_status, 0), COALESCE(last_probe_at, '')
 FROM channel_states
 WHERE channel_id = ?
 `, channelID)
@@ -321,6 +323,7 @@ WHERE channel_id = ?
 		&state.LastError,
 		&state.LastLatencyMS,
 		&state.LastHTTPStatus,
+		&state.LastProbeAt,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return core.RuntimeState{ChannelID: channelID, Status: core.StatusUnknown}, nil
@@ -330,6 +333,25 @@ WHERE channel_id = ?
 	state.Status = core.ChannelStatus(status)
 	state.AutoDisabledByWatchdog = autoDisabled == 1
 	return state, nil
+}
+
+type ProbeStats struct {
+	Total    int
+	Failures int
+}
+
+func (s *Store) RecentProbeStats(ctx context.Context, channelID int64, window time.Duration) (ProbeStats, error) {
+	since := time.Now().UTC().Add(-window).Format("2006-01-02T15:04:05.000Z")
+	row := s.db.QueryRowContext(ctx, `
+SELECT COUNT(*), COALESCE(SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END), 0)
+FROM probe_events
+WHERE channel_id = ? AND created_at >= ?
+`, channelID, since)
+	var stats ProbeStats
+	if err := row.Scan(&stats.Total, &stats.Failures); err != nil {
+		return stats, err
+	}
+	return stats, nil
 }
 
 type StateUpdate struct {
@@ -781,6 +803,7 @@ func scanChannelView(rows *sql.Rows) (ChannelView, error) {
 	channel.NewAPIStatus = nullStringValue(newAPIStatus)
 	channel.TestModel = nullStringValue(testModel)
 	channel.WatchdogStatus = core.ChannelStatus(watchdogStatus)
+	channel.WatchdogEnabled = true
 	_ = json.Unmarshal([]byte(modelsJSON), &channel.Models)
 	if autoBan.Valid {
 		value := autoBan.Int64 == 1

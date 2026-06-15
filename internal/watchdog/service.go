@@ -133,6 +133,43 @@ func (s *Service) RunOnce(ctx context.Context) (RunResult, error) {
 	return result, nil
 }
 
+func (s *Service) DiscoverOnly(ctx context.Context) (RunResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	runID := newRunID()
+	result := RunResult{RunID: runID, Status: "running"}
+	if err := s.store.StartRun(ctx, runID); err != nil {
+		return result, err
+	}
+
+	channels, err := s.client.DiscoverChannels(ctx)
+	if err != nil {
+		result.Status = "failed"
+		result.Error = err.Error()
+		_ = s.finishRun(ctx, result)
+		return result, err
+	}
+	result.ChannelsSeen = len(channels)
+
+	for _, channel := range channels {
+		if err := s.store.UpsertChannel(ctx, channel); err != nil {
+			result.Status = "failed"
+			result.Error = err.Error()
+			_ = s.finishRun(ctx, result)
+			return result, err
+		}
+	}
+	if err := s.store.RebuildModelSnapshots(ctx); err != nil {
+		result.Status = "failed"
+		result.Error = err.Error()
+		_ = s.finishRun(ctx, result)
+		return result, err
+	}
+	result.Status = "ok"
+	return result, s.finishRun(ctx, result)
+}
+
 func (s *Service) ProbeChannel(ctx context.Context, channelID int64) (RunResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -253,18 +290,24 @@ type channelStats struct {
 
 func (s *Service) processChannel(ctx context.Context, runID string, channel core.ChannelInfo, forceProbe bool) (channelStats, error) {
 	var stats channelStats
+	if !forceProbe && !s.channelProbeEnabled(channel.ID) {
+		return stats, nil
+	}
 	state, err := s.store.RuntimeState(ctx, channel.ID)
 	if err != nil {
 		return stats, err
 	}
 	previous := state.Status
+	if state.AutoDisabledByWatchdog && !forceProbe && !s.recoveryWaitElapsed(state) {
+		return stats, nil
+	}
 	if channel.DisabledInNewAPI() && !state.AutoDisabledByWatchdog && !s.cfg.Policy.ProbeManualDisabled && !forceProbe {
 		decision := core.EvaluateProbe(channel, state, nil, s.cfg.Policy.Rules())
 		return stats, s.applyDecision(ctx, channel, previous, decision, nil, &stats)
 	}
 
 	results := make([]core.ProbeResult, 0)
-	for _, model := range s.modelsForProbe(channel) {
+	for _, model := range s.modelsForProbe(channel, forceProbe) {
 		result, err := s.client.ProbeChannel(ctx, channel, model)
 		if err != nil {
 			return stats, err
@@ -282,6 +325,11 @@ func (s *Service) processChannel(ctx context.Context, runID string, channel core
 	}
 	aggregate := aggregateResults(channel.ID, results)
 	decision := core.EvaluateProbe(channel, state, aggregate, s.cfg.Policy.Rules())
+	var breakerErr error
+	decision, breakerErr = s.applyErrorRateCircuitBreaker(ctx, channel, state, decision)
+	if breakerErr != nil {
+		return stats, breakerErr
+	}
 	return stats, s.applyDecision(ctx, channel, previous, decision, aggregate, &stats)
 }
 
@@ -371,9 +419,60 @@ func (s *Service) applyDecision(ctx context.Context, channel core.ChannelInfo, p
 	return nil
 }
 
-func (s *Service) modelsForProbe(channel core.ChannelInfo) []string {
+func (s *Service) channelProbeEnabled(channelID int64) bool {
+	if s.cfg.Probe.PerChannel == nil {
+		return true
+	}
+	target, ok := s.cfg.Probe.PerChannel[strconv.FormatInt(channelID, 10)]
+	if !ok || target.Enabled == nil {
+		return true
+	}
+	return *target.Enabled
+}
+
+func (s *Service) recoveryWaitElapsed(state core.RuntimeState) bool {
+	wait := time.Duration(s.cfg.Policy.RecoveryWaitSeconds) * time.Second
+	if wait <= 0 || state.LastProbeAt == "" {
+		return true
+	}
+	lastProbe, err := time.Parse(time.RFC3339Nano, state.LastProbeAt)
+	if err != nil {
+		return true
+	}
+	return time.Since(lastProbe) >= wait
+}
+
+func (s *Service) applyErrorRateCircuitBreaker(ctx context.Context, channel core.ChannelInfo, state core.RuntimeState, decision core.PolicyDecision) (core.PolicyDecision, error) {
+	rules := s.cfg.Policy.Rules()
+	if !rules.AutoDisable || state.AutoDisabledByWatchdog || rules.ErrorRateMinRequests <= 0 || rules.ErrorRateThreshold <= 0 {
+		return decision, nil
+	}
+	autoBanAllowed := channel.AutoBan == nil || *channel.AutoBan || !rules.RespectChannelAutoBan
+	if !autoBanAllowed {
+		return decision, nil
+	}
+	stats, err := s.store.RecentProbeStats(ctx, channel.ID, time.Hour)
+	if err != nil {
+		return decision, err
+	}
+	if stats.Total < rules.ErrorRateMinRequests {
+		return decision, nil
+	}
+	errorRate := float64(stats.Failures) * 100 / float64(stats.Total)
+	if errorRate < rules.ErrorRateThreshold {
+		return decision, nil
+	}
+	decision.Status = core.StatusDown
+	decision.Reason = fmt.Sprintf("error rate %.1f%% reached threshold %.1f%% over %d recent probes", errorRate, rules.ErrorRateThreshold, stats.Total)
+	decision.ConsecutiveFailures = maxInt(decision.ConsecutiveFailures, 1)
+	decision.ConsecutiveSuccesses = 0
+	decision.ShouldDisable = true
+	return decision, nil
+}
+
+func (s *Service) modelsForProbe(channel core.ChannelInfo, forceProbe bool) []string {
 	if target, ok := s.cfg.Probe.PerChannel[strconv.FormatInt(channel.ID, 10)]; ok {
-		if target.Enabled != nil && !*target.Enabled {
+		if target.Enabled != nil && !*target.Enabled && !forceProbe {
 			return nil
 		}
 		if len(target.Models) > 0 {
@@ -424,7 +523,9 @@ func (s *Service) loop(ctx context.Context) {
 	ticker := time.NewTicker(s.cfg.Policy.Interval())
 	defer ticker.Stop()
 	for {
-		_, _ = s.RunOnce(ctx)
+		if s.readyForAutoRun() {
+			_, _ = s.RunOnce(ctx)
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -493,6 +594,19 @@ func fallback(value, backup string) string {
 		return value
 	}
 	return backup
+}
+
+func (s *Service) readyForAutoRun() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg.Setup.Completed && s.cfg.NewAPI.BaseURL != "" && s.cfg.NewAPI.AdminToken != ""
+}
+
+func maxInt(left, right int) int {
+	if left > right {
+		return left
+	}
+	return right
 }
 
 var ErrNotFound = errors.New("not found")

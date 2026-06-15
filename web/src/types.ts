@@ -18,6 +18,7 @@ export type ChannelView = {
   group_name: string
   auto_ban: boolean | null
   newapi_disabled: boolean
+  watchdog_enabled: boolean
   auto_disabled_by_watchdog: boolean
   consecutive_failures: number
   consecutive_successes: number
@@ -149,8 +150,11 @@ export type PolicyConfig = {
   per_channel_delay_seconds: number
   failure_threshold: number
   recovery_threshold: number
+  recovery_wait_seconds: number
   degraded_failure_threshold: number
   slow_latency_ms: number
+  error_rate_threshold: number
+  error_rate_min_requests: number
   auto_disable: boolean
   auto_recover: boolean
   dry_run: boolean
