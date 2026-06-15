@@ -31,5 +31,6 @@ USER watchdog
 EXPOSE 8088
 VOLUME ["/data"]
 
+WORKDIR /
 ENTRYPOINT ["newapi-watchdog"]
 CMD ["-config", "/app/config.yaml"]

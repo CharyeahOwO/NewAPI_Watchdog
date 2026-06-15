@@ -1,20 +1,16 @@
 services:
   newapi-watchdog:
-    build: .
+    image: ghcr.io/charyeahowo/newapi_watchdog:latest
     container_name: newapi-watchdog
-    restart: unless-stopped
+    restart: always
+    environment:
+      - TZ=Asia/Shanghai
     command: ["-config", "/app/config/config.yaml"]
     ports:
       - "8088:8088"
     volumes:
       - ./config:/app/config:ro
       - watchdog-data:/data
-    networks:
-      - newapi
-
-networks:
-  newapi:
-    external: true
 
 volumes:
   watchdog-data:
