@@ -9,7 +9,11 @@ dist/
 *.db
 coverage.out
 .playwright-mcp/
+.claude/
+.codex-logs/
+.codex-run/
 newapi-watchdog-dashboard.png
+login.png
 web/node_modules/
 web/dist/
 web/*.tsbuildinfo
