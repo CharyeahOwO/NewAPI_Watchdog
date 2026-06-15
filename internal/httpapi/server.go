@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"net/http"
 	"strconv"
@@ -52,6 +53,11 @@ type loginResponse struct {
 
 type channelProbeSettingsRequest struct {
 	Enabled bool `json:"enabled"`
+}
+
+type channelProbeRequest struct {
+	Model             string `json:"model"`
+	UseUpstreamModels bool   `json:"use_upstream_models"`
 }
 
 func New(cfg config.Config, store *store.Store, service *watchdog.Service) (*Server, error) {
@@ -398,7 +404,20 @@ func (s *Server) probeChannel(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.service.ProbeChannel(r.Context(), channelID)
+	var payload channelProbeRequest
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	var (
+		result watchdog.RunResult
+		err    error
+	)
+	if payload.UseUpstreamModels || strings.TrimSpace(payload.Model) != "" {
+		result, err = s.service.ProbeChannelWithModel(r.Context(), channelID, payload.Model, payload.UseUpstreamModels)
+	} else {
+		result, err = s.service.ProbeChannel(r.Context(), channelID)
+	}
 	if err != nil {
 		writeError(w, statusForServiceError(err), err)
 		return

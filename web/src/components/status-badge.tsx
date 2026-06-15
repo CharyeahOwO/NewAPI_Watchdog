@@ -27,7 +27,7 @@ export function StatusBadge({ status }: { status: ChannelStatus | string }) {
       variant={variant}
       className={cn(
         "h-7 min-w-[4.75rem] justify-center gap-1.5 whitespace-nowrap rounded-full px-2.5 font-medium leading-none",
-        status === "manually_disabled" && "border-slate-200 bg-slate-50 text-slate-600",
+        status === "manually_disabled" && "border-stone-200 bg-stone-50 text-stone-500",
       )}
     >
       <span
@@ -36,10 +36,10 @@ export function StatusBadge({ status }: { status: ChannelStatus | string }) {
           status === "healthy" && "bg-emerald-500",
           status === "degraded" && "bg-amber-500",
           status === "recovering" && "bg-amber-500",
-          status === "down" && "bg-red-500",
-          status === "auto_disabled" && "bg-red-500",
-          status === "manually_disabled" && "bg-slate-400",
-          status === "unknown" && "bg-muted-foreground",
+          status === "down" && "bg-rose-500",
+          status === "auto_disabled" && "bg-rose-500",
+          status === "manually_disabled" && "bg-stone-400",
+          status === "unknown" && "bg-stone-400",
         )}
       />
       <span>{label}</span>

@@ -10,6 +10,10 @@ declare const _default: {
             };
         };
         extend: {
+            fontFamily: {
+                sans: [string, string, string, string, string, string, string, string];
+                serif: [string, string, string, string];
+            };
             colors: {
                 border: string;
                 input: string;
@@ -48,6 +52,8 @@ declare const _default: {
             };
             boxShadow: {
                 soft: string;
+                paper: string;
+                lift: string;
             };
         };
     };

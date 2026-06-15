@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { UseMutationResult } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 import { Controller, useForm } from "react-hook-form"
+import { motion, Variants } from "framer-motion"
+import CountUp from "react-countup"
 import {
   Activity,
   Bot,
@@ -81,6 +83,8 @@ const navItems = [
   { path: "/rules", label: "策略", icon: SlidersHorizontal },
   { path: "/settings", label: "设置", icon: Settings },
 ]
+
+const UPSTREAM_MODEL_VALUE = "__upstream__"
 
 const rulesSchema = z.object({
   interval_seconds: z.coerce.number().int().min(10),
@@ -229,27 +233,27 @@ function App() {
 
   return (
     <div className="console-shell min-h-screen">
-      <aside className="fixed inset-y-0 left-0 hidden w-56 border-r bg-muted/45 px-3 py-4 backdrop-blur-xl lg:block">
+      <aside className="fixed inset-y-0 left-0 hidden w-56 border-r border-stone-200 bg-stone-50/60 px-3 py-5 backdrop-blur-xl lg:block">
         <div className="flex items-center gap-3 px-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-2xl border bg-foreground text-background shadow-sm">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-700 shadow-paper">
             <Terminal className="h-4 w-4" />
           </div>
           <div>
-            <div className="text-sm font-semibold">NewAPI Watchdog</div>
-            <div className="text-xs text-muted-foreground">旁路健康控制台</div>
+            <div className="text-sm font-medium text-stone-800">NewAPI Watchdog</div>
+            <div className="text-xs text-stone-500">旁路健康控制台</div>
           </div>
         </div>
-        <nav className="mt-7 space-y-1">
+        <nav className="mt-8 space-y-1">
           {navItems.map((item) => (
             <button
               key={item.path}
               onClick={() => navigate(item.path)}
               className={cn(
-                "flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm text-muted-foreground transition-colors hover:bg-background hover:text-foreground",
-                path === item.path && "bg-background text-foreground shadow-sm ring-1 ring-border hover:bg-background",
+                "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-stone-500 transition-all duration-300 ease-out active:scale-[0.99] hover:bg-white hover:text-stone-800",
+                path === item.path && "bg-white text-stone-900 shadow-paper ring-1 ring-stone-200 hover:bg-white",
               )}
             >
-              <item.icon className="h-4 w-4" />
+              <item.icon className={cn("h-4 w-4 transition-colors", path === item.path ? "text-stone-700" : "text-stone-400")} />
               {item.label}
             </button>
           ))}
@@ -257,16 +261,16 @@ function App() {
       </aside>
 
       <div className="lg:pl-56">
-        <header className="sticky top-0 z-30 border-b bg-background/78 backdrop-blur-xl">
+        <header className="sticky top-0 z-30 border-b border-stone-200 bg-[#FDFCFB]/80 backdrop-blur-xl">
           <div className="px-4 py-3 sm:px-5 lg:px-6">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="min-w-0">
-                <div className="inline-flex h-9 flex-wrap items-center gap-2 rounded-full border bg-card px-3 text-sm text-muted-foreground shadow-sm">
+                <div className="inline-flex h-9 flex-wrap items-center gap-2 rounded-full border border-stone-200 bg-white px-3 text-sm text-stone-500 shadow-paper">
                   <span>控制台</span>
-                  <ChevronRight className="h-3.5 w-3.5" />
-                  <span className="text-foreground">{navItems.find((item) => item.path === path)?.label || "总览"}</span>
+                  <ChevronRight className="h-3.5 w-3.5 text-stone-400" />
+                  <span className="text-stone-800">{navItems.find((item) => item.path === path)?.label || "总览"}</span>
                 </div>
-                <h1 className="mt-1.5 break-words text-lg font-semibold tracking-tight sm:text-xl">
+                <h1 className="mt-2 break-words font-serif text-xl font-normal tracking-tight text-stone-900 sm:text-2xl">
                   {bootstrap.data?.title || "NewAPI Channel Watchdog"}
                 </h1>
               </div>
@@ -289,10 +293,10 @@ function App() {
                   key={item.path}
                   onClick={() => navigate(item.path)}
                   className={cn(
-                    "flex flex-none items-center gap-2 rounded-2xl border px-3 py-2 text-sm transition-colors",
+                    "flex flex-none items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-all duration-300 ease-out active:scale-[0.99]",
                     path === item.path
-                      ? "border-foreground bg-foreground text-background"
-                      : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+                      ? "border-stone-300 bg-white text-stone-900 shadow-paper"
+                      : "border-stone-200 bg-transparent text-stone-500 hover:bg-white hover:text-stone-800",
                   )}
                 >
                   <item.icon className="h-4 w-4" />
@@ -302,7 +306,7 @@ function App() {
             </nav>
           </div>
         </header>
-        <main className="px-4 py-5 sm:px-5 lg:px-6">
+        <main className="px-4 py-6 sm:px-5 lg:px-8">
           <RunFeedback mutation={runMutation} />
           {content}
         </main>
@@ -315,44 +319,50 @@ function RunFeedback({ mutation }: { mutation: UseMutationResult<RunResult, Erro
   if (mutation.isIdle) return null
   if (mutation.isPending) {
     return (
-      <Card className="mb-5 border-muted bg-muted/35">
-        <CardContent className="flex items-center gap-3 p-4 text-sm text-muted-foreground">
-          <RefreshCw className="h-4 w-4 animate-spin" />
-          正在向 NewAPI 拉取渠道信息。
-        </CardContent>
-      </Card>
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: "easeOut" }}>
+        <Card className="mb-5 border-stone-200 bg-stone-50">
+          <CardContent className="flex items-center gap-3 p-5 text-sm text-stone-500">
+            <RefreshCw className="h-4 w-4 animate-spin" />
+            正在向 NewAPI 拉取渠道信息。
+          </CardContent>
+        </Card>
+      </motion.div>
     )
   }
   if (mutation.isError) {
     return (
-      <Card className="mb-5 border-destructive/30 bg-destructive/5">
-        <CardContent className="flex items-start gap-3 p-4 text-sm text-destructive">
-          <CircleAlert className="mt-0.5 h-4 w-4 flex-none" />
-          <div>
-            <div className="font-medium">操作失败</div>
-            <div className="mt-1 break-words">{mutation.error.message}</div>
-          </div>
-        </CardContent>
-      </Card>
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: "easeOut" }}>
+        <Card className="mb-5 border-rose-200 bg-rose-50/60">
+          <CardContent className="flex items-start gap-3 p-5 text-sm text-rose-700">
+            <CircleAlert className="mt-0.5 h-4 w-4 flex-none" />
+            <div>
+              <div className="font-medium">操作失败</div>
+              <div className="mt-1 break-words">{mutation.error.message}</div>
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
     )
   }
   const result = mutation.data
   const discoveryOnly = result.probes_total === 0 && result.actions_taken === 0
   return (
-    <Card className="mb-5 border-emerald-200 bg-emerald-50/70">
-      <CardContent className="flex items-start gap-3 p-4 text-sm text-emerald-900">
-        <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none" />
-        <div>
-          <div className="font-medium">{discoveryOnly ? "发现完成" : "巡检完成"}</div>
-          <div className="mt-1">
-            {discoveryOnly
-              ? `发现 ${result.channels_seen} 个渠道，未执行渠道探测。`
-              : `发现 ${result.channels_seen} 个渠道，探测 ${result.probes_total} 次，成功 ${result.probes_ok} 次，失败 ${result.probes_failed} 次。`}
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: "easeOut" }}>
+      <Card className="mb-5 border-emerald-200 bg-emerald-50/60">
+        <CardContent className="flex items-start gap-3 p-5 text-sm text-emerald-800">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none" />
+          <div>
+            <div className="font-medium">{discoveryOnly ? "发现完成" : "巡检完成"}</div>
+            <div className="mt-1">
+              {discoveryOnly
+                ? `发现 ${result.channels_seen} 个渠道，未执行渠道探测。`
+                : `发现 ${result.channels_seen} 个渠道，探测 ${result.probes_total} 次，成功 ${result.probes_ok} 次，失败 ${result.probes_failed} 次。`}
+            </div>
+            {result.channels_seen === 0 ? <div className="mt-1 text-emerald-700/80">没有渠道通常表示 NewAPI 管理接口没有返回渠道，或当前管理 Token 权限不够。</div> : null}
           </div>
-          {result.channels_seen === 0 ? <div className="mt-1">没有渠道通常表示 NewAPI 管理接口没有返回渠道，或当前管理 Token 权限不够。</div> : null}
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </motion.div>
   )
 }
 
@@ -412,8 +422,8 @@ function LoginPage({
         {mutation.isPending ? "处理中" : initialized ? "登录" : "下一步"}
       </Button>
       {!initialized ? (
-        <div className="flex items-start gap-2 rounded-md border bg-muted/45 p-3 text-xs leading-5 text-muted-foreground">
-          <ShieldCheck className="mt-0.5 h-4 w-4 flex-none" />
+        <div className="flex items-start gap-2 rounded-xl border border-stone-200 bg-stone-50 p-3 text-xs leading-5 text-stone-500">
+          <ShieldCheck className="mt-0.5 h-4 w-4 flex-none text-stone-400" />
           首个账号默认拥有管理员权限。
         </div>
       ) : null}
@@ -424,14 +434,14 @@ function LoginPage({
     return (
       <main className="console-shell min-h-screen px-4 py-8">
         <section className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[280px_1fr]">
-          <aside className="rounded-lg border bg-background p-5">
+          <aside className="rounded-xl border border-stone-200 bg-white p-6 shadow-paper">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-foreground text-background">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-700">
                 <Terminal className="h-4 w-4" />
               </div>
               <div>
-                <div className="text-sm font-semibold">NewAPI Watchdog</div>
-                <div className="text-xs text-muted-foreground">首次引导</div>
+                <div className="text-sm font-medium text-stone-800">NewAPI Watchdog</div>
+                <div className="text-xs text-stone-500">首次引导</div>
               </div>
             </div>
             <div className="mt-8 space-y-2">
@@ -460,15 +470,15 @@ function LoginPage({
     <main className="console-shell flex min-h-screen items-center justify-center px-4 py-10">
       <section className="grid w-full max-w-5xl gap-6 lg:grid-cols-[1fr_440px] lg:items-center">
         <div className="hidden lg:block">
-          <div className="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm text-muted-foreground">
-            <Terminal className="h-4 w-4" />
+          <div className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white px-3 py-2 text-sm text-stone-500 shadow-paper">
+            <Terminal className="h-4 w-4 text-stone-400" />
             旁路健康控制台
           </div>
-          <h1 className="mt-6 max-w-xl text-4xl font-semibold tracking-tight">{title}</h1>
+          <h1 className="mt-6 max-w-xl font-serif text-4xl font-normal leading-tight tracking-tight text-stone-900">{title}</h1>
         </div>
-        <Card className="border-border/80 shadow-xl shadow-black/5">
+        <Card className="shadow-lift">
           <CardHeader>
-            <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-lg bg-foreground text-background">
+            <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl border border-stone-200 bg-stone-50 text-stone-700">
               <KeyRound className="h-5 w-5" />
             </div>
             <CardTitle>{initialized ? "管理员登录" : "初始化管理员"}</CardTitle>
@@ -492,10 +502,10 @@ function LoginPage({
 function DashboardPage({ status, loading }: { status?: StatusSnapshot; loading: boolean }) {
   const counts = status?.summary.counts
   const cards = [
-    { label: "总渠道", value: status?.summary.total_channels ?? "-", icon: Workflow },
-    { label: "健康", value: counts?.healthy ?? 0, icon: CheckCircle2 },
-    { label: "降级/恢复", value: (counts?.degraded ?? 0) + (counts?.recovering ?? 0), icon: Gauge },
-    { label: "故障/禁用", value: (counts?.down ?? 0) + (counts?.auto_disabled ?? 0), icon: CircleAlert },
+    { label: "总渠道", value: status?.summary.total_channels ?? "-", icon: Workflow, tint: "text-stone-400" },
+    { label: "健康", value: counts?.healthy ?? 0, icon: CheckCircle2, tint: "text-emerald-600" },
+    { label: "降级/恢复", value: (counts?.degraded ?? 0) + (counts?.recovering ?? 0), icon: Gauge, tint: "text-amber-600" },
+    { label: "故障/禁用", value: (counts?.down ?? 0) + (counts?.auto_disabled ?? 0), icon: CircleAlert, tint: "text-rose-500" },
   ]
   const statusPie = counts
     ? Object.entries(counts).map(([name, value]) => ({ name, value }))
@@ -509,101 +519,155 @@ function DashboardPage({ status, loading }: { status?: StatusSnapshot; loading: 
     risk: model.degraded + model.down + model.auto_disabled,
   }))
 
+  const containerVariants: Variants = {
+    hidden: { opacity: 0 },
+    show: {
+      opacity: 1,
+      transition: { staggerChildren: 0.08, delayChildren: 0.05 }
+    }
+  }
+
+  const itemVariants: Variants = {
+    hidden: { opacity: 0, y: 16 },
+    show: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.22, 1, 0.36, 1] } }
+  }
+
   return (
-    <div className="space-y-6">
-      <PageHead
-        eyebrow="总览"
-        title="旁路健康总览"
-        description="这里展示 NewAPI 渠道和模型的当前健康面，不接管业务流量，只解释状态变化。"
-      />
+    <motion.div className="space-y-6" initial="hidden" animate="show" variants={containerVariants}>
+      <motion.div variants={itemVariants}>
+        <PageHead
+          eyebrow="总览"
+          title="旁路健康总览"
+          description="这里展示 NewAPI 渠道和模型的当前健康面，不接管业务流量，只解释状态变化。"
+        />
+      </motion.div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {cards.map((card) => (
-          <Card key={card.label}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">{card.label}</CardTitle>
-              <card.icon className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-semibold tracking-tight">{loading ? "..." : card.value}</div>
-            </CardContent>
-          </Card>
+          <motion.div key={card.label} variants={itemVariants}>
+            <Card className="transition-all duration-300 ease-out hover:-translate-y-0.5 hover:shadow-lift active:scale-[0.99]">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 p-6 pb-2">
+                <CardTitle className="font-sans text-sm font-medium text-stone-500">{card.label}</CardTitle>
+                <card.icon className={cn("h-4 w-4", card.tint)} />
+              </CardHeader>
+              <CardContent className="p-6 pt-0">
+                <div className="font-data text-5xl font-light tracking-tight text-stone-900">
+                  {loading ? <span className="text-stone-300">…</span> : <CountUp end={Number(card.value) || 0} duration={1.6} separator="," />}
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
         ))}
       </div>
       <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle>最近巡检</CardTitle>
-            <CardDescription>成功和失败探测数量的短期走势。</CardDescription>
-          </CardHeader>
-          <CardContent className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={runTrend}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="name" tickLine={false} axisLine={false} />
-                <YAxis tickLine={false} axisLine={false} />
-                <Tooltip />
-                <Area type="monotone" dataKey="ok" stackId="1" stroke="#111827" fill="#111827" fillOpacity={0.12} />
-                <Area type="monotone" dataKey="failed" stackId="1" stroke="#dc2626" fill="#dc2626" fillOpacity={0.16} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>状态分布</CardTitle>
-            <CardDescription>渠道状态机当前计数。</CardDescription>
-          </CardHeader>
-          <CardContent className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={statusPie} dataKey="value" nameKey="name" innerRadius={58} outerRadius={88}>
-                  {statusPie.map((_, index) => (
-                    <Cell key={index} fill={["#111827", "#16a34a", "#f59e0b", "#dc2626", "#737373", "#a3a3a3", "#d97706"][index % 7]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
+        <motion.div variants={itemVariants}>
+          <Card className="h-full transition-all duration-300 ease-out hover:shadow-lift">
+            <CardHeader>
+              <CardTitle>最近巡检</CardTitle>
+              <CardDescription>成功和失败探测数量的短期走势。</CardDescription>
+            </CardHeader>
+            <CardContent className="h-72 pt-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={runTrend}>
+                  <defs>
+                    <linearGradient id="fillOk" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#059669" stopOpacity={0.18} />
+                      <stop offset="100%" stopColor="#059669" stopOpacity={0.02} />
+                    </linearGradient>
+                    <linearGradient id="fillFailed" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#f43f5e" stopOpacity={0.18} />
+                      <stop offset="100%" stopColor="#f43f5e" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f5f5f4" />
+                  <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: '#78716c', fontSize: 12 }} />
+                  <YAxis tickLine={false} axisLine={false} tick={{ fill: '#78716c', fontSize: 12 }} />
+                  <Tooltip cursor={{ stroke: '#e7e5e4' }} contentStyle={{ borderRadius: '12px', border: '1px solid #e7e5e4', boxShadow: '0 8px 24px -8px rgba(168, 162, 158, 0.35)' }} />
+                  <Area type="monotone" dataKey="ok" stackId="1" stroke="#059669" strokeWidth={2} fill="url(#fillOk)" animationDuration={900} animationEasing="ease-out" />
+                  <Area type="monotone" dataKey="failed" stackId="1" stroke="#f43f5e" strokeWidth={2} fill="url(#fillFailed)" animationDuration={900} animationEasing="ease-out" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        </motion.div>
+        <motion.div variants={itemVariants}>
+          <Card className="h-full transition-all duration-300 ease-out hover:shadow-lift">
+            <CardHeader>
+              <CardTitle>状态分布</CardTitle>
+              <CardDescription>渠道状态机当前计数。</CardDescription>
+            </CardHeader>
+            <CardContent className="h-72 pt-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={statusPie} dataKey="value" nameKey="name" innerRadius={58} outerRadius={88} paddingAngle={2} stroke="#ffffff" strokeWidth={2} animationDuration={900} animationEasing="ease-out">
+                    {statusPie.map((_, index) => (
+                      <Cell key={index} fill={["#a8a29e", "#059669", "#d97706", "#f43f5e", "#e11d48", "#d6d3d1", "#78716c"][index % 7]} />
+                    ))}
+                  </Pie>
+                  <Tooltip contentStyle={{ borderRadius: '12px', border: '1px solid #e7e5e4', boxShadow: '0 8px 24px -8px rgba(168, 162, 158, 0.35)' }} />
+                </PieChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        </motion.div>
       </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>模型健康面</CardTitle>
-          <CardDescription>按模型聚合的健康渠道和风险渠道。</CardDescription>
-        </CardHeader>
-        <CardContent className="h-80">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={modelBars}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="name" tickLine={false} axisLine={false} />
-              <YAxis tickLine={false} axisLine={false} />
-              <Tooltip />
-              <Bar dataKey="healthy" fill="#111827" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="risk" fill="#ef4444" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </CardContent>
-      </Card>
-    </div>
+      <motion.div variants={itemVariants}>
+        <Card className="transition-all duration-300 ease-out hover:shadow-lift">
+          <CardHeader>
+            <CardTitle>模型健康面</CardTitle>
+            <CardDescription>按模型聚合的健康渠道和风险渠道。</CardDescription>
+          </CardHeader>
+          <CardContent className="h-80 pt-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={modelBars} barGap={6}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f5f5f4" />
+                <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: '#78716c', fontSize: 12 }} />
+                <YAxis tickLine={false} axisLine={false} tick={{ fill: '#78716c', fontSize: 12 }} />
+                <Tooltip cursor={{ fill: '#fafaf9' }} contentStyle={{ borderRadius: '12px', border: '1px solid #e7e5e4', boxShadow: '0 8px 24px -8px rgba(168, 162, 158, 0.35)' }} />
+                <Bar dataKey="healthy" fill="#059669" radius={[4, 4, 0, 0]} animationDuration={900} animationEasing="ease-out" />
+                <Bar dataKey="risk" fill="#f43f5e" radius={[4, 4, 0, 0]} animationDuration={900} animationEasing="ease-out" />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </motion.div>
+    </motion.div>
   )
+}
+
+function channelModelNames(channel: ChannelView) {
+  const names = new Set<string>()
+  for (const model of channel.models || []) {
+    if (model.trim()) names.add(model.trim())
+  }
+  if (channel.test_model?.trim()) names.add(channel.test_model.trim())
+  return Array.from(names).sort((left, right) => left.localeCompare(right))
 }
 
 function ChannelsPage({ token, header }: ProtectedProps) {
   const queryClient = useQueryClient()
   const channels = useQuery({ queryKey: ["channels"], queryFn: api.channels })
-  const [action, setAction] = React.useState<{ type: "probe" | "disable" | "enable"; channel: ChannelView } | null>(null)
+  const [probeModels, setProbeModels] = React.useState<Record<number, string>>({})
+  const [action, setAction] = React.useState<{ type: "disable" | "enable"; channel: ChannelView } | null>(null)
+  type ChannelAction = NonNullable<typeof action> | { type: "probe"; channel: ChannelView; probeModel: string }
   const toggleMutation = useMutation({
     mutationFn: (payload: { channelID: number; enabled: boolean }) =>
       api.setChannelProbeSettings(payload.channelID, payload.enabled, token, header),
     onSuccess: () => queryClient.invalidateQueries(),
   })
   const mutation = useMutation({
-    mutationFn: async () => {
-      if (!action) return null
-      if (action.type === "probe") return api.probeChannel(action.channel.channel_id, token, header)
-      if (action.type === "disable") return api.disableChannel(action.channel.channel_id, token, header)
-      return api.enableChannel(action.channel.channel_id, token, header)
+    mutationFn: async (payload: ChannelAction) => {
+      if (payload.type === "probe") {
+        return api.probeChannel(
+          payload.channel.channel_id,
+          token,
+          header,
+          payload.probeModel === UPSTREAM_MODEL_VALUE
+            ? { use_upstream_models: true }
+            : { model: payload.probeModel },
+        )
+      }
+      if (payload.type === "disable") return api.disableChannel(payload.channel.channel_id, token, header)
+      return api.enableChannel(payload.channel.channel_id, token, header)
     },
     onSuccess: () => {
       setAction(null)
@@ -632,6 +696,32 @@ function ChannelsPage({ token, header }: ProtectedProps) {
       },
       { accessorKey: "watchdog_status", header: "状态", cell: ({ row }) => <StatusBadge status={row.original.watchdog_status} /> },
       { accessorKey: "last_latency_ms", header: "延迟", cell: ({ row }) => ms(row.original.last_latency_ms) },
+      {
+        id: "probe_model",
+        header: "探测模型",
+        cell: ({ row }) => {
+          const channel = row.original
+          const selected = probeModels[channel.channel_id] || UPSTREAM_MODEL_VALUE
+          const models = channelModelNames(channel)
+          return (
+            <select
+              className="h-9 w-56 max-w-full rounded-full border border-stone-200 bg-white px-3 text-sm text-stone-700 shadow-paper outline-none transition-colors focus:border-stone-300 focus:ring-2 focus:ring-stone-200"
+              value={selected}
+              onChange={(event) =>
+                setProbeModels((current) => ({
+                  ...current,
+                  [channel.channel_id]: event.target.value,
+                }))
+              }
+            >
+              <option value={UPSTREAM_MODEL_VALUE}>从上游获取模型</option>
+              {models.map((model) => (
+                <option key={model} value={model}>{model}</option>
+              ))}
+            </select>
+          )
+        },
+      },
       { accessorKey: "success_rate_1h", header: "1h", cell: ({ row }) => percent(row.original.success_rate_1h) },
       { accessorKey: "success_rate_24h", header: "24h", cell: ({ row }) => percent(row.original.success_rate_24h) },
       {
@@ -649,14 +739,26 @@ function ChannelsPage({ token, header }: ProtectedProps) {
         header: "",
         cell: ({ row }) => (
           <div className="flex justify-end gap-2">
-            <Button className="rounded-full" size="sm" variant="outline" onClick={() => setAction({ type: "probe", channel: row.original })}>探测</Button>
+            <Button
+              className="rounded-full"
+              size="sm"
+              variant="outline"
+              disabled={!token || mutation.isPending}
+              onClick={() => mutation.mutate({
+                type: "probe",
+                channel: row.original,
+                probeModel: probeModels[row.original.channel_id] || UPSTREAM_MODEL_VALUE,
+              })}
+            >
+              探测
+            </Button>
             <Button className="rounded-full" size="sm" variant="outline" onClick={() => setAction({ type: "disable", channel: row.original })}>禁用</Button>
             <Button className="rounded-full" size="sm" variant="outline" onClick={() => setAction({ type: "enable", channel: row.original })}>启用</Button>
           </div>
         ),
       },
     ],
-    [token, toggleMutation],
+    [token, toggleMutation, mutation, probeModels],
   )
 
   return (
@@ -664,6 +766,7 @@ function ChannelsPage({ token, header }: ProtectedProps) {
       <PageHead eyebrow="渠道" title="渠道" description="查看渠道健康、错误和延迟，并执行手动探测、禁用、恢复操作。" />
       <DataTable columns={columns} data={channels.data || []} searchKey="name" searchPlaceholder="搜索渠道名称" />
       {toggleMutation.error ? <p className="text-sm text-destructive">{toggleMutation.error.message}</p> : null}
+      {!action && mutation.error ? <p className="text-sm text-destructive">{mutation.error.message}</p> : null}
       <Dialog open={!!action} onOpenChange={(open) => !open && setAction(null)}>
         <DialogContent>
           <DialogHeader>
@@ -675,7 +778,7 @@ function ChannelsPage({ token, header }: ProtectedProps) {
           {mutation.error ? <p className="text-sm text-destructive">{mutation.error.message}</p> : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => setAction(null)}>取消</Button>
-            <Button onClick={() => mutation.mutate()} disabled={!token || mutation.isPending}>
+            <Button onClick={() => action && mutation.mutate(action)} disabled={!token || mutation.isPending}>
               {mutation.isPending ? "执行中" : "确认"}
             </Button>
           </DialogFooter>
@@ -716,7 +819,22 @@ function EventsPage() {
       { accessorKey: "channel_id", header: "渠道" },
       { accessorKey: "current_status", header: "状态", cell: ({ row }) => <StatusBadge status={row.original.current_status} /> },
       { accessorKey: "action", header: "动作", cell: ({ row }) => row.original.action || "-" },
-      { accessorKey: "dry_run", header: "模式", cell: ({ row }) => (row.original.dry_run ? <Badge variant="warning">模拟运行</Badge> : <Badge variant="success">真实执行</Badge>) },
+      {
+        accessorKey: "dry_run",
+        header: "模式",
+        cell: ({ row }) => {
+          const dryRun = row.original.dry_run
+          return (
+            <Badge
+              variant={dryRun ? "warning" : "success"}
+              className="h-7 min-w-[4.75rem] justify-center gap-1.5 whitespace-nowrap rounded-full px-2.5 font-medium leading-none"
+            >
+              <span className={cn("h-1.5 w-1.5 rounded-full", dryRun ? "bg-amber-500" : "bg-emerald-500")} />
+              <span>{dryRun ? "模拟运行" : "真实执行"}</span>
+            </Badge>
+          )
+        },
+      },
       { accessorKey: "reason", header: "原因" },
     ],
     [],
@@ -853,8 +971,8 @@ function SettingsPage({ token, header }: ProtectedProps) {
         <CardContent>
           <form className="space-y-8" onSubmit={form.handleSubmit((values) => mutation.mutate(values))}>
             <ConnectionFields form={form} hasAdminToken={settings.data?.has_admin_token} />
-            <details className="rounded-lg border p-4">
-              <summary className="cursor-pointer text-sm font-medium">高级配置</summary>
+            <details className="rounded-xl border border-stone-200 p-4">
+              <summary className="cursor-pointer text-sm font-medium text-stone-700">高级配置</summary>
               <div className="mt-5 grid gap-5 lg:grid-cols-2">
                 <AdvancedSettingsFields form={form} />
               </div>
@@ -939,14 +1057,14 @@ function SetupWizard({ token, header, username, onDone }: { token: string; heade
   return (
     <main className="console-shell min-h-screen px-4 py-8">
       <section className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[280px_1fr]">
-        <aside className="rounded-lg border bg-background p-5">
+        <aside className="rounded-xl border border-stone-200 bg-white p-6 shadow-paper">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-foreground text-background">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-700">
               <Terminal className="h-4 w-4" />
             </div>
             <div>
-              <div className="text-sm font-semibold">NewAPI Watchdog</div>
-              <div className="text-xs text-muted-foreground">{username}</div>
+              <div className="text-sm font-medium text-stone-800">NewAPI Watchdog</div>
+              <div className="text-xs text-stone-500">{username}</div>
             </div>
           </div>
           <div className="mt-8 space-y-2">
@@ -1004,8 +1122,8 @@ function SetupWizard({ token, header, username, onDone }: { token: string; heade
 
             {step === "finish" ? (
               <div className="space-y-6">
-                <div className="rounded-lg border bg-muted/35 p-5">
-                  <div className="flex items-center gap-3">
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-5">
+                  <div className="flex items-center gap-3 text-emerald-800">
                     <CheckCircle2 className="h-5 w-5" />
                     <div className="font-medium">初始化完成</div>
                   </div>
@@ -1030,8 +1148,8 @@ function SetupWizard({ token, header, username, onDone }: { token: string; heade
 
 function StepItem({ active, done, index, label }: { active: boolean; done: boolean; index: string; label: string }) {
   return (
-    <div className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm", active ? "bg-foreground text-background" : "text-muted-foreground")}>
-      <span className={cn("flex h-6 w-6 items-center justify-center rounded-full border text-xs", done && "bg-emerald-600 text-white")}>
+    <div className={cn("flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all duration-300 ease-out", active ? "bg-white text-stone-900 shadow-paper ring-1 ring-stone-200" : "text-stone-500")}>
+      <span className={cn("flex h-6 w-6 items-center justify-center rounded-full border border-stone-200 text-xs", done && "border-emerald-600 bg-emerald-600 text-white", active && !done && "border-stone-300 text-stone-700")}>
         {done ? <CheckCircle2 className="h-3.5 w-3.5" /> : index}
       </span>
       {label}
@@ -1092,13 +1210,13 @@ function AdvancedSettingsFields({ form }: { form: FormLike }) {
 function PageHead({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+      <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-stone-400">
         <ListFilter className="h-3.5 w-3.5" />
         {eyebrow}
       </div>
       <div>
-        <h2 className="text-2xl font-semibold tracking-tight">{title}</h2>
-        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{description}</p>
+        <h2 className="font-serif text-2xl font-normal tracking-tight text-stone-900">{title}</h2>
+        <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-stone-500">{description}</p>
       </div>
     </div>
   )
@@ -1147,7 +1265,7 @@ function SwitchField({ label, name, form }: { label: string; name: string; form:
       control={form.control}
       name={name}
       render={({ field }) => (
-        <div className="flex items-center justify-between rounded-lg border p-3">
+        <div className="flex items-center justify-between rounded-xl border border-stone-200 p-3.5 transition-colors hover:bg-stone-50">
           <Label>{label}</Label>
           <Switch checked={Boolean(field.value)} onCheckedChange={field.onChange} />
         </div>

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,6 +45,8 @@ type RunResult struct {
 	Status       string `json:"status"`
 	Error        string `json:"error,omitempty"`
 }
+
+const upstreamModelsForProbe = "__upstream_models__"
 
 func New(cfg config.Config, store *store.Store, client NewAPI) *Service {
 	return &Service{
@@ -101,7 +104,7 @@ func (s *Service) RunOnce(ctx context.Context) (RunResult, error) {
 			_ = s.finishRun(ctx, result)
 			return result, err
 		}
-		stats, err := s.processChannel(ctx, runID, channel, false)
+		stats, err := s.processChannel(ctx, runID, channel, false, nil)
 		if err != nil {
 			result.Status = "failed"
 			result.Error = err.Error()
@@ -171,6 +174,20 @@ func (s *Service) DiscoverOnly(ctx context.Context) (RunResult, error) {
 }
 
 func (s *Service) ProbeChannel(ctx context.Context, channelID int64) (RunResult, error) {
+	return s.probeChannel(ctx, channelID, nil)
+}
+
+func (s *Service) ProbeChannelWithModel(ctx context.Context, channelID int64, model string, useUpstreamModels bool) (RunResult, error) {
+	var models []string
+	if useUpstreamModels {
+		models = []string{upstreamModelsForProbe}
+	} else if model = strings.TrimSpace(model); model != "" {
+		models = []string{model}
+	}
+	return s.probeChannel(ctx, channelID, models)
+}
+
+func (s *Service) probeChannel(ctx context.Context, channelID int64, modelOverride []string) (RunResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -186,7 +203,10 @@ func (s *Service) ProbeChannel(ctx context.Context, channelID int64) (RunResult,
 	if err := s.store.StartRun(ctx, runID); err != nil {
 		return result, err
 	}
-	stats, err := s.processChannel(ctx, runID, channel, true)
+	if len(modelOverride) == 1 && modelOverride[0] == upstreamModelsForProbe {
+		modelOverride = upstreamModels(channel)
+	}
+	stats, err := s.processChannel(ctx, runID, channel, true, modelOverride)
 	result.ProbesTotal = stats.ProbesTotal
 	result.ProbesOK = stats.ProbesOK
 	result.ProbesFailed = stats.ProbesFailed
@@ -288,7 +308,7 @@ type channelStats struct {
 	ActionsTaken int
 }
 
-func (s *Service) processChannel(ctx context.Context, runID string, channel core.ChannelInfo, forceProbe bool) (channelStats, error) {
+func (s *Service) processChannel(ctx context.Context, runID string, channel core.ChannelInfo, forceProbe bool, modelOverride []string) (channelStats, error) {
 	var stats channelStats
 	if !forceProbe && !s.channelProbeEnabled(channel.ID) {
 		return stats, nil
@@ -307,7 +327,11 @@ func (s *Service) processChannel(ctx context.Context, runID string, channel core
 	}
 
 	results := make([]core.ProbeResult, 0)
-	for _, model := range s.modelsForProbe(channel, forceProbe) {
+	models := modelOverride
+	if models == nil {
+		models = s.modelsForProbe(channel, forceProbe)
+	}
+	for _, model := range models {
 		result, err := s.client.ProbeChannel(ctx, channel, model)
 		if err != nil {
 			return stats, err
@@ -488,6 +512,16 @@ func (s *Service) modelsForProbe(channel core.ChannelInfo, forceProbe bool) []st
 		if channel.TestModel != "" {
 			return []string{channel.TestModel}
 		}
+	}
+	return []string{""}
+}
+
+func upstreamModels(channel core.ChannelInfo) []string {
+	if len(channel.Models) > 0 {
+		return channel.Models
+	}
+	if channel.TestModel != "" {
+		return []string{channel.TestModel}
 	}
 	return []string{""}
 }

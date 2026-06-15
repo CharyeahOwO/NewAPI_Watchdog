@@ -13,6 +13,7 @@ import (
 type fakeClient struct {
 	channels []core.ChannelInfo
 	results  map[int64]core.ProbeResult
+	models   []string
 	probe    int
 	disable  int
 	enable   int
@@ -24,6 +25,7 @@ func (f *fakeClient) DiscoverChannels(ctx context.Context) ([]core.ChannelInfo, 
 
 func (f *fakeClient) ProbeChannel(ctx context.Context, channel core.ChannelInfo, model string) (core.ProbeResult, error) {
 	f.probe++
+	f.models = append(f.models, model)
 	result := f.results[channel.ID]
 	result.Model = model
 	return result, nil
@@ -178,6 +180,30 @@ func TestRunOnceSkipsChannelWhenProbeDisabled(t *testing.T) {
 	}
 	if result.ChannelsSeen != 1 || result.ProbesTotal != 0 || client.probe != 0 {
 		t.Fatalf("disabled channel should be discovered but not probed: result=%#v probes=%d", result, client.probe)
+	}
+}
+
+func TestProbeChannelWithUpstreamModels(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	st := newWatchdogStore(t)
+	defer st.Close()
+	client := &fakeClient{
+		channels: []core.ChannelInfo{{ID: 6, Name: "upstream", Status: "1", Models: []string{"gpt-4o", "claude-sonnet"}}},
+		results: map[int64]core.ProbeResult{
+			6: {ChannelID: 6, OK: true, LatencyMS: 20, ErrorClass: core.ErrorNone},
+		},
+	}
+	service := New(cfg, st, client)
+	result, err := service.ProbeChannelWithModel(ctx, 6, "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ProbesTotal != 2 || client.probe != 2 {
+		t.Fatalf("expected two upstream model probes, result=%#v probes=%d", result, client.probe)
+	}
+	if len(client.models) != 2 || client.models[0] != "gpt-4o" || client.models[1] != "claude-sonnet" {
+		t.Fatalf("unexpected probed models: %#v", client.models)
 	}
 }
 

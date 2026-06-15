@@ -14,7 +14,6 @@ import { ChevronLeft, ChevronRight, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { cn } from "@/lib/utils"
 
 type DataTableProps<TData, TValue> = {
   columns: ColumnDef<TData, TValue>[]
@@ -47,20 +46,20 @@ export function DataTable<TData, TValue>({
   })
 
   return (
-    <div className="overflow-hidden rounded-3xl border bg-card shadow-soft">
-      <div className="flex flex-col gap-3 border-b bg-card/95 p-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="overflow-hidden rounded-xl border border-stone-200 bg-card shadow-paper">
+      <div className="flex flex-col gap-3 border-b border-stone-100 p-4 sm:flex-row sm:items-center sm:justify-between">
         {searchKey ? (
           <div className="relative w-full max-w-md">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
             <Input
-              className="h-10 rounded-2xl border-input bg-background/70 pl-9 shadow-none"
+              className="h-10 rounded-xl border-stone-200 bg-stone-50/60 pl-9 shadow-none transition-colors focus-visible:bg-white"
               placeholder={searchPlaceholder}
               value={(table.getColumn(searchKey)?.getFilterValue() as string) ?? ""}
               onChange={(event) => table.getColumn(searchKey)?.setFilterValue(event.target.value)}
             />
           </div>
         ) : <div />}
-        <div className="text-sm text-muted-foreground">
+        <div className="text-sm text-stone-500">
           共 {table.getFilteredRowModel().rows.length} 条
         </div>
       </div>
@@ -80,7 +79,7 @@ export function DataTable<TData, TValue>({
           <TableBody>
             {table.getRowModel().rows.length ? (
               table.getRowModel().rows.map((row) => (
-                <TableRow key={row.id} className={cn(row.index % 2 === 0 && "bg-muted/20")}>
+                <TableRow key={row.id} className="transition-colors hover:bg-stone-50/70">
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
                   ))}
@@ -88,7 +87,7 @@ export function DataTable<TData, TValue>({
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={columns.length} className="h-24 text-center text-muted-foreground">
+                <TableCell colSpan={columns.length} className="h-24 text-center text-stone-400">
                   暂无数据
                 </TableCell>
               </TableRow>
@@ -96,7 +95,7 @@ export function DataTable<TData, TValue>({
           </TableBody>
         </Table>
       </div>
-      <div className="flex items-center justify-between border-t bg-card px-4 py-3 text-sm text-muted-foreground">
+      <div className="flex items-center justify-between border-t border-stone-100 px-4 py-3 text-sm text-stone-500">
         <span>
           当前第 {table.getState().pagination.pageIndex + 1} 页
         </span>

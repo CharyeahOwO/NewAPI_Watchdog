@@ -75,8 +75,13 @@ export const api = {
     request<ChannelView>(`/api/channels/${channelID}/probe-settings`, { method: "PUT", body: JSON.stringify({ enabled }) }, token, header),
   runProbe: (token: string, header: string) =>
     request<RunResult>("/api/probe/run", { method: "POST" }, token, header),
-  probeChannel: (channelID: number, token: string, header: string) =>
-    request<RunResult>(`/api/channels/${channelID}/probe`, { method: "POST" }, token, header),
+  probeChannel: (channelID: number, token: string, header: string, payload?: { model?: string; use_upstream_models?: boolean }) =>
+    request<RunResult>(
+      `/api/channels/${channelID}/probe`,
+      { method: "POST", body: payload ? JSON.stringify(payload) : undefined },
+      token,
+      header,
+    ),
   disableChannel: (channelID: number, token: string, header: string) =>
     request(`/api/channels/${channelID}/disable`, { method: "POST" }, token, header),
   enableChannel: (channelID: number, token: string, header: string) =>
