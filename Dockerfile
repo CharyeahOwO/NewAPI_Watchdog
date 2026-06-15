@@ -33,4 +33,3 @@ VOLUME ["/data"]
 
 WORKDIR /
 ENTRYPOINT ["newapi-watchdog"]
-CMD ["-config", "/app/config.yaml"]

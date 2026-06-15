@@ -43,6 +43,12 @@ func TestServerStatusAndAuth(t *testing.T) {
 	cfg := config.Default()
 	cfg.Server.AutoStart = false
 	cfg.Auth.WriteToken = "secret"
+	cfg.Auth.Username = "admin"
+	passwordHash, err := hashPassword("secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Auth.PasswordHash = passwordHash
 	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "watchdog.sqlite3"))
 	if err != nil {
 		t.Fatal(err)
@@ -129,5 +135,60 @@ func TestServerReturnsEmptyArrays(t *testing.T) {
 		if strings.TrimSpace(string(body)) != "[]" {
 			t.Fatalf("expected %s to return [], got %s", path, body)
 		}
+	}
+}
+
+func TestLoginInitializesAdmin(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.Server.AutoStart = false
+	cfg.Auth.WriteToken = ""
+	cfg.Auth.Username = ""
+	cfg.Auth.PasswordHash = ""
+	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "watchdog.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	service := watchdog.New(cfg, st, &apiFakeClient{})
+	server, err := New(cfg, st, service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := server.Router()
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"secret-pass"}`)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected first login 200, got %d %s", response.Code, response.Body.String())
+	}
+	var login loginResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &login); err != nil {
+		t.Fatal(err)
+	}
+	if login.Token == "" || login.Username != "admin" || login.Role != "admin" {
+		t.Fatalf("unexpected login response: %#v", login)
+	}
+
+	saved, err := st.RuntimeConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Auth.Username != "admin" || saved.Auth.PasswordHash == "" || saved.Auth.PasswordHash == "secret-pass" {
+		t.Fatalf("admin credentials were not persisted safely: %#v", saved.Auth)
+	}
+
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"bad-pass"}`)))
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("expected bad password 401, got %d", response.Code)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
+	req.Header.Set(login.TokenHeader, login.Token)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected settings 200 after login, got %d %s", response.Code, response.Body.String())
 	}
 }

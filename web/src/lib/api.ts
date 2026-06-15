@@ -9,20 +9,27 @@ import type {
   StatusEvent,
   StatusSnapshot,
   RuntimeConfig,
+  AuthResponse,
 } from "@/types"
 
-const TOKEN_KEY = "newapi-watchdog-write-token"
+const TOKEN_KEY = "newapi-watchdog-session-token"
+const USER_KEY = "newapi-watchdog-session-user"
 
-export function getStoredToken() {
-  return window.localStorage.getItem(TOKEN_KEY) || ""
+export function getStoredSession() {
+  return {
+    token: window.localStorage.getItem(TOKEN_KEY) || "",
+    username: window.localStorage.getItem(USER_KEY) || "",
+  }
 }
 
-export function setStoredToken(token: string) {
-  if (!token) {
-    window.localStorage.removeItem(TOKEN_KEY)
-    return
-  }
-  window.localStorage.setItem(TOKEN_KEY, token)
+export function setStoredSession(session: { token: string; username: string }) {
+  window.localStorage.setItem(TOKEN_KEY, session.token)
+  window.localStorage.setItem(USER_KEY, session.username)
+}
+
+export function clearStoredSession() {
+  window.localStorage.removeItem(TOKEN_KEY)
+  window.localStorage.removeItem(USER_KEY)
 }
 
 async function request<T>(path: string, init: RequestInit = {}, token?: string, headerName = "X-Watchdog-Token"): Promise<T> {
@@ -49,6 +56,8 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string, 
 
 export const api = {
   bootstrap: () => request<Bootstrap>("/api/bootstrap"),
+  login: (payload: { username: string; password: string }) =>
+    request<AuthResponse>("/api/auth/login", { method: "POST", body: JSON.stringify(payload) }),
   status: () => request<StatusSnapshot>("/status.json"),
   channels: () => request<ChannelView[]>("/api/channels"),
   models: () => request<ModelView[]>("/api/models"),
@@ -69,4 +78,3 @@ export const api = {
   enableChannel: (channelID: number, token: string, header: string) =>
     request(`/api/channels/${channelID}/enable`, { method: "POST" }, token, header),
 }
-

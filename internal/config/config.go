@@ -28,6 +28,8 @@ type ServerConfig struct {
 type AuthConfig struct {
 	WriteToken       string `json:"write_token" yaml:"write_token"`
 	WriteTokenHeader string `json:"write_token_header" yaml:"write_token_header"`
+	Username         string `json:"username" yaml:"username"`
+	PasswordHash     string `json:"password_hash" yaml:"password_hash"`
 }
 
 type DatabaseConfig struct {
@@ -183,6 +185,7 @@ func Load(path string) (Config, error) {
 func Sanitize(cfg Config) Config {
 	out := cfg
 	out.Auth.WriteToken = ""
+	out.Auth.PasswordHash = ""
 	out.NewAPI.AdminToken = ""
 	return out
 }
@@ -190,6 +193,12 @@ func Sanitize(cfg Config) Config {
 func MergeSecrets(next Config, current Config) Config {
 	if next.Auth.WriteToken == "" {
 		next.Auth.WriteToken = current.Auth.WriteToken
+	}
+	if next.Auth.Username == "" {
+		next.Auth.Username = current.Auth.Username
+	}
+	if next.Auth.PasswordHash == "" {
+		next.Auth.PasswordHash = current.Auth.PasswordHash
 	}
 	if next.NewAPI.AdminToken == "" {
 		next.NewAPI.AdminToken = current.NewAPI.AdminToken

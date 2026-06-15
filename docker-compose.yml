@@ -5,11 +5,9 @@ services:
     restart: always
     environment:
       - TZ=Asia/Shanghai
-    command: ["-config", "/app/config/config.yaml"]
     ports:
       - "8088:8088"
     volumes:
-      - ./config:/app/config:ro
       - watchdog-data:/data
 
 volumes:

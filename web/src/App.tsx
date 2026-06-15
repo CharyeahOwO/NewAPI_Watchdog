@@ -11,8 +11,10 @@ import {
   CircleAlert,
   Gauge,
   History,
+  KeyRound,
   LayoutDashboard,
   ListFilter,
+  LogOut,
   Play,
   RefreshCw,
   Settings,
@@ -55,9 +57,10 @@ import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
-import { api, getStoredToken, setStoredToken } from "@/lib/api"
+import { api, clearStoredSession, getStoredSession, setStoredSession } from "@/lib/api"
 import { cn, ms, percent } from "@/lib/utils"
 import type {
+  AuthResponse,
   ChannelView,
   ModelView,
   PolicyConfig,
@@ -119,8 +122,6 @@ const settingsSchema = z.object({
   timeout_seconds: z.coerce.number().int().min(1),
   enabled_status_value: z.coerce.number().int(),
   disabled_status_value: z.coerce.number().int(),
-  write_token: z.string(),
-  write_token_header: z.string().min(1),
   discovery_source: z.string().min(1),
   discovery_sqlite_path: z.string(),
   discovery_sqlite_query: z.string(),
@@ -137,10 +138,10 @@ type SettingsForm = z.infer<typeof settingsSchema>
 
 function App() {
   const [path, setPath] = React.useState(() => normalizePath(window.location.pathname))
-  const [token, setToken] = React.useState(getStoredToken)
+  const [session, setSession] = React.useState(getStoredSession)
   const queryClient = useQueryClient()
   const bootstrap = useQuery({ queryKey: ["bootstrap"], queryFn: api.bootstrap, refetchInterval: false })
-  const status = useQuery({ queryKey: ["status"], queryFn: api.status })
+  const status = useQuery({ queryKey: ["status"], queryFn: api.status, enabled: !!session.token })
 
   React.useEffect(() => {
     const onPop = () => setPath(normalizePath(window.location.pathname))
@@ -153,16 +154,38 @@ function App() {
     setPath(normalizePath(next))
   }
 
-  function saveToken(next: string) {
-    setStoredToken(next)
-    setToken(next)
+  function saveSession(next: AuthResponse) {
+    const stored = { token: next.token, username: next.username }
+    setStoredSession(stored)
+    setSession(stored)
+    queryClient.invalidateQueries()
+  }
+
+  function logout() {
+    clearStoredSession()
+    setSession({ token: "", username: "" })
+    queryClient.clear()
+    window.history.pushState({}, "", "/")
+    setPath("/dashboard")
   }
 
   const header = bootstrap.data?.write_token_header || "X-Watchdog-Token"
+  const token = session.token
   const runMutation = useMutation({
     mutationFn: () => api.runProbe(token, header),
     onSuccess: () => queryClient.invalidateQueries(),
   })
+
+  if (!session.token) {
+    return (
+      <LoginPage
+        title={bootstrap.data?.title || "NewAPI Channel Watchdog"}
+        initialized={Boolean(bootstrap.data?.auth_initialized)}
+        loading={bootstrap.isLoading}
+        onLogin={saveSession}
+      />
+    )
+  }
 
   const content = (() => {
     switch (path) {
@@ -228,10 +251,14 @@ function App() {
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant={status.data?.dry_run ? "warning" : "success"}>{status.data?.dry_run ? "模拟运行" : "真实执行"}</Badge>
-                <TokenDialog token={token} onSave={saveToken} header={header} />
+                <Badge variant="outline">{session.username || "admin"}</Badge>
                 <Button size="sm" variant="outline" onClick={() => runMutation.mutate()} disabled={!token || runMutation.isPending}>
                   {runMutation.isPending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
                   立即巡检
+                </Button>
+                <Button size="sm" variant="ghost" onClick={logout}>
+                  <LogOut className="h-4 w-4" />
+                  退出
                 </Button>
               </div>
             </div>
@@ -257,6 +284,102 @@ function App() {
         <main className="px-4 py-5 sm:px-5 lg:px-8">{content}</main>
       </div>
     </div>
+  )
+}
+
+function LoginPage({
+  title,
+  initialized,
+  loading,
+  onLogin,
+}: {
+  title: string
+  initialized: boolean
+  loading: boolean
+  onLogin: (response: AuthResponse) => void
+}) {
+  const [username, setUsername] = React.useState(initialized ? "" : "admin")
+  const [password, setPassword] = React.useState("")
+  const mutation = useMutation({
+    mutationFn: () => api.login({ username: username.trim(), password }),
+    onSuccess: onLogin,
+  })
+
+  React.useEffect(() => {
+    if (!initialized && !username) {
+      setUsername("admin")
+    }
+  }, [initialized, username])
+
+  return (
+    <main className="console-shell flex min-h-screen items-center justify-center px-4 py-10">
+      <section className="grid w-full max-w-5xl gap-6 lg:grid-cols-[1fr_440px] lg:items-center">
+        <div className="hidden lg:block">
+          <div className="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm text-muted-foreground">
+            <Terminal className="h-4 w-4" />
+            旁路健康控制台
+          </div>
+          <h1 className="mt-6 max-w-xl text-4xl font-semibold tracking-tight">{title}</h1>
+          <p className="mt-4 max-w-lg text-sm leading-6 text-muted-foreground">
+            登录后配置 NewAPI 地址、管理员 Token、巡检策略和自动恢复规则。首次登录会创建管理员账号，之后所有配置都在控制台完成。
+          </p>
+        </div>
+        <Card className="border-border/80 shadow-xl shadow-black/5">
+          <CardHeader>
+            <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-lg bg-foreground text-background">
+              <KeyRound className="h-5 w-5" />
+            </div>
+            <CardTitle>{initialized ? "管理员登录" : "初始化管理员"}</CardTitle>
+            <CardDescription>
+              {loading
+                ? "正在读取控制台状态。"
+                : initialized
+                  ? "输入管理员账号和密码进入控制台。"
+                  : "第一次提交的账号和密码会成为管理员账号。"}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form
+              className="space-y-4"
+              onSubmit={(event) => {
+                event.preventDefault()
+                mutation.mutate()
+              }}
+            >
+              <div className="space-y-2">
+                <Label>账号</Label>
+                <Input
+                  autoComplete="username"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  placeholder="admin"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>密码</Label>
+                <Input
+                  autoComplete={initialized ? "current-password" : "new-password"}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  type="password"
+                  placeholder={initialized ? "输入管理员密码" : "设置管理员密码"}
+                />
+              </div>
+              {mutation.error ? <p className="text-sm text-destructive">{mutation.error.message}</p> : null}
+              <Button className="w-full" disabled={!username.trim() || !password || mutation.isPending}>
+                {mutation.isPending ? "处理中" : initialized ? "登录" : "创建并登录"}
+              </Button>
+              {!initialized ? (
+                <div className="flex items-start gap-2 rounded-md border bg-muted/45 p-3 text-xs leading-5 text-muted-foreground">
+                  <ShieldCheck className="mt-0.5 h-4 w-4 flex-none" />
+                  首个账号默认拥有管理员权限。后续 NewAPI 连接、巡检策略和自动动作都在登录后的设置页维护。
+                </div>
+              ) : null}
+            </form>
+          </CardContent>
+        </Card>
+      </section>
+    </main>
   )
 }
 
@@ -429,7 +552,6 @@ function ChannelsPage({ token, header }: ProtectedProps) {
               {action ? `${action.type} #${action.channel.channel_id} ${action.channel.name}` : ""}
             </DialogDescription>
           </DialogHeader>
-          {!token ? <p className="text-sm text-destructive">请先在右上角输入写操作 Token。</p> : null}
           {mutation.error ? <p className="text-sm text-destructive">{mutation.error.message}</p> : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => setAction(null)}>取消</Button>
@@ -530,7 +652,6 @@ function RulesPage({ token, header }: ProtectedProps) {
   return (
     <div className="space-y-6">
       <PageHead eyebrow="策略" title="策略配置" description="失败阈值、恢复阈值、自动动作和错误分类都在这里维护，保存后立即生效。" />
-      {!token ? <AuthRequired /> : null}
       <Card>
         <CardHeader>
           <CardTitle>运行策略</CardTitle>
@@ -584,12 +705,11 @@ function SettingsPage({ token, header }: ProtectedProps) {
   })
   return (
     <div className="space-y-6">
-      <PageHead eyebrow="设置" title="系统设置" description="NewAPI 连接、发现来源、探测模式和写操作鉴权都在后台保存，不再依赖环境变量。" />
-      {!token ? <AuthRequired /> : null}
+      <PageHead eyebrow="设置" title="系统设置" description="NewAPI 连接、发现来源和探测模式都在后台保存，部署后直接在这里维护。" />
       <Card>
         <CardHeader>
           <CardTitle>连接与发现</CardTitle>
-          <CardDescription>Token 字段留空表示保留当前值，不会被接口回显。</CardDescription>
+          <CardDescription>NewAPI 管理 Token 留空表示保留当前值，不会被接口回显。</CardDescription>
         </CardHeader>
         <CardContent>
           <form className="grid gap-5 lg:grid-cols-2" onSubmit={form.handleSubmit((values) => mutation.mutate(values))}>
@@ -597,8 +717,6 @@ function SettingsPage({ token, header }: ProtectedProps) {
             <InputField label="NewAPI 管理 Token" name="admin_token" form={form} type="password" placeholder={settings.data?.has_admin_token ? "已设置，留空保留" : "未设置"} />
             <InputField label="管理 Token 请求头" name="admin_token_header" form={form} />
             <InputField label="管理 Token 前缀" name="admin_token_prefix" form={form} />
-            <InputField label="写操作 Token" name="write_token" form={form} type="password" placeholder={settings.data?.has_write_token ? "已设置，留空保留" : "未设置"} />
-            <InputField label="写操作请求头" name="write_token_header" form={form} />
             <SelectField
               label="发现来源"
               name="discovery_source"
@@ -653,43 +771,6 @@ function PageHead({ eyebrow, title, description }: { eyebrow: string; title: str
         <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{description}</p>
       </div>
     </div>
-  )
-}
-
-function TokenDialog({ token, onSave, header }: { token: string; onSave: (value: string) => void; header: string }) {
-  const [open, setOpen] = React.useState(false)
-  const [value, setValue] = React.useState(token)
-  return (
-    <>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-        <ShieldCheck className="h-4 w-4" />
-        {token ? "已授权" : "输入 Token"}
-      </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>写操作授权</DialogTitle>
-            <DialogDescription>保存到浏览器本地，只用于调用需要鉴权的后台接口。请求头：{header}</DialogDescription>
-          </DialogHeader>
-          <Input value={value} onChange={(event) => setValue(event.target.value)} type="password" placeholder="X-Watchdog-Token" />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setValue(""); onSave(""); setOpen(false) }}>清除</Button>
-            <Button onClick={() => { onSave(value); setOpen(false) }}>保存</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
-  )
-}
-
-function AuthRequired() {
-  return (
-    <Card className="border-amber-200 bg-amber-50/70">
-      <CardContent className="flex items-center gap-3 p-4 text-sm text-amber-900">
-        <ShieldCheck className="h-4 w-4" />
-        请先在右上角输入写操作 Token，才能读取和保存后台配置。
-      </CardContent>
-    </Card>
   )
 }
 
@@ -785,8 +866,6 @@ function toSettingsForm(response: SettingsResponse): SettingsForm {
     timeout_seconds: cfg.newapi.timeout_seconds,
     enabled_status_value: cfg.newapi.enabled_status_value,
     disabled_status_value: cfg.newapi.disabled_status_value,
-    write_token: "",
-    write_token_header: cfg.auth.write_token_header,
     discovery_source: cfg.discovery.source,
     discovery_sqlite_path: cfg.discovery.sqlite_path,
     discovery_sqlite_query: cfg.discovery.sqlite_query,
@@ -803,11 +882,6 @@ function toSettingsForm(response: SettingsResponse): SettingsForm {
 function fromSettingsForm(values: SettingsForm, current: SettingsResponse["config"]): SettingsResponse["config"] {
   return {
     ...current,
-    auth: {
-      ...current.auth,
-      write_token: values.write_token,
-      write_token_header: values.write_token_header,
-    },
     discovery: {
       ...current.discovery,
       source: values.discovery_source,

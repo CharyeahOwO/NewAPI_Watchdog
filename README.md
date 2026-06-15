@@ -31,19 +31,7 @@ State Machine Flow:
 
 ### 1. Docker Deployment (Recommended)
 
-Start the service via Docker Compose. No complex network configuration is required:
-
-```bash
-# 1. Create config and data directories
-mkdir -p config
-cp config.example.yaml config/config.yaml
-
-# 2. Start the service
-docker compose up -d
-```
-*Tip: After starting, configure your NewAPI's full public or local URL in the console Settings. No additional Docker network mappings are required.*
-
-**For 1Panel or similar management panels, use the following `docker-compose.yml`:**
+For Docker or 1Panel, use the following `docker-compose.yml`. No `config.yaml` is required before startup; initialization is completed from the login page and settings UI.
 
 ```yaml
 services:
@@ -53,46 +41,32 @@ services:
     restart: always
     environment:
       - TZ=Asia/Shanghai
-    command: ["-config", "/app/config/config.yaml"]
     ports:
       - "8088:8088"
     volumes:
-      - ./config:/app/config:ro
       - watchdog-data:/data
 
 volumes:
   watchdog-data:
 ```
 
-If 1Panel logs show `read /app/config.yaml: is a directory`, the host path was created as a directory. Remove that directory, then switch to `./config/config.yaml` and redeploy:
-
 ```bash
-rm -rf config.yaml
-mkdir -p config
-cp config.example.yaml config/config.yaml
+docker compose up -d
 ```
 
-If logs show `open sqlite store: unable to open database file`, the host `./data` directory is usually not writable by the non-root container user. Use the Docker named volume `watchdog-data:/data` from the template above instead of binding a host directory to `/app/data`.
+If logs show `open sqlite store: unable to open database file`, it is usually a host directory permission issue. Use the Docker named volume `watchdog-data:/data` from the template above instead of binding a host directory to `/app/data`.
 
 ### 2. Run from Source
 
 ```bash
-cp config.example.yaml config.yaml
-go run ./cmd/watchdog -config config.yaml
+go run ./cmd/watchdog
 ```
 
 ### 3. Initial Configuration
 
-`config.yaml` is only used for the initial startup to set the listening port and the initial admin token.
-```yaml
-auth:
-  write_token: change-me  # Update this to a secure token
-  write_token_header: X-Watchdog-Token
-```
-
 After starting the service:
 1. Open the console at `http://127.0.0.1:8088/`
-2. Click **"Input Token"** and enter your `write_token`.
+2. The first visit opens the login page. Enter an account and password; the first account automatically becomes the administrator.
 3. Navigate to **Settings** to configure your NewAPI Base URL and Admin Token.
 4. Navigate to **Rules** to configure failure/recovery thresholds and disable `dry-run` if actual auto-actions are required.
 
@@ -100,7 +74,7 @@ After starting the service:
 
 **Backend:**
 ```bash
-go run ./cmd/watchdog -config config.yaml
+go run ./cmd/watchdog
 ```
 
 **Frontend:**
@@ -118,7 +92,7 @@ cd .. && go build -o dist/newapi-watchdog ./cmd/watchdog
 
 ## API Endpoints
 
-The watchdog provides RESTful JSON APIs. Read APIs are public; Write/Action APIs require the `X-Watchdog-Token` authentication header.
+The watchdog provides RESTful JSON APIs. The console automatically carries a session credential after login; read APIs are public, while write/action APIs require administrator login.
 
 - `GET /status.json` - Machine-readable overall status
 - `GET /healthz` / `GET /readyz` - Health checks

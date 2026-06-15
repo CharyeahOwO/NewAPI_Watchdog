@@ -99,6 +99,8 @@ export type RuntimeConfig = {
   auth: {
     write_token: string
     write_token_header: string
+    username: string
+    password_hash: string
   }
   database: {
     sqlite_path: string
@@ -164,6 +166,8 @@ export type Bootstrap = {
   title: string
   write_token_header: string
   dry_run: boolean
+  auth_initialized: boolean
+  username: string
 }
 
 export type RunResult = {
@@ -177,3 +181,10 @@ export type RunResult = {
   error?: string
 }
 
+export type AuthResponse = {
+  token: string
+  token_header: string
+  username: string
+  role: "admin"
+  initialized: boolean
+}

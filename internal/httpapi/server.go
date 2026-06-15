@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,6 +34,19 @@ type settingsResponse struct {
 	Config        config.Config `json:"config"`
 	HasWriteToken bool          `json:"has_write_token"`
 	HasAdminToken bool          `json:"has_admin_token"`
+}
+
+type loginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type loginResponse struct {
+	Token       string `json:"token"`
+	TokenHeader string `json:"token_header"`
+	Username    string `json:"username"`
+	Role        string `json:"role"`
+	Initialized bool   `json:"initialized"`
 }
 
 func New(cfg config.Config, store *store.Store, service *watchdog.Service) (*Server, error) {
@@ -62,6 +76,7 @@ func (s *Server) Router() http.Handler {
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/bootstrap", s.bootstrap)
+		r.Post("/auth/login", s.login)
 		r.Get("/channels", s.channels)
 		r.Get("/models", s.models)
 		r.Get("/events", s.events)
@@ -106,6 +121,79 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		"title":              cfg.Server.Title,
 		"write_token_header": cfg.Auth.WriteTokenHeader,
 		"dry_run":            cfg.Policy.DryRun,
+		"auth_initialized":   cfg.Auth.Username != "" && cfg.Auth.PasswordHash != "",
+		"username":           cfg.Auth.Username,
+	})
+}
+
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	var payload loginRequest
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	username := strings.TrimSpace(payload.Username)
+	password := payload.Password
+	if username == "" || password == "" {
+		writeError(w, http.StatusBadRequest, errors.New("username and password are required"))
+		return
+	}
+
+	cfg := s.currentConfig()
+	initialized := cfg.Auth.Username != "" && cfg.Auth.PasswordHash != ""
+	if !initialized {
+		passwordHash, err := hashPassword(password)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		token, err := generateSessionToken()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if cfg.Auth.WriteTokenHeader == "" {
+			cfg.Auth.WriteTokenHeader = "X-Watchdog-Token"
+		}
+		cfg.Auth.Username = username
+		cfg.Auth.PasswordHash = passwordHash
+		cfg.Auth.WriteToken = token
+		if err := s.applyConfig(r.Context(), cfg); err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, loginResponse{
+			Token:       token,
+			TokenHeader: cfg.Auth.WriteTokenHeader,
+			Username:    username,
+			Role:        "admin",
+			Initialized: true,
+		})
+		return
+	}
+
+	if username != cfg.Auth.Username || !verifyPassword(password, cfg.Auth.PasswordHash) {
+		writeError(w, http.StatusUnauthorized, errors.New("invalid username or password"))
+		return
+	}
+	if cfg.Auth.WriteToken == "" {
+		token, err := generateSessionToken()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		cfg.Auth.WriteToken = token
+		if err := s.applyConfig(r.Context(), cfg); err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, loginResponse{
+		Token:       cfg.Auth.WriteToken,
+		TokenHeader: cfg.Auth.WriteTokenHeader,
+		Username:    cfg.Auth.Username,
+		Role:        "admin",
+		Initialized: true,
 	})
 }
 
@@ -291,8 +379,8 @@ func (s *Server) requireWriteToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfg := s.currentConfig()
 		expected := cfg.Auth.WriteToken
-		if expected == "" {
-			writeError(w, http.StatusServiceUnavailable, errors.New("write token is not configured"))
+		if cfg.Auth.Username == "" || cfg.Auth.PasswordHash == "" || expected == "" {
+			writeError(w, http.StatusServiceUnavailable, errors.New("admin account is not initialized"))
 			return
 		}
 		if r.Header.Get(cfg.Auth.WriteTokenHeader) != expected {
