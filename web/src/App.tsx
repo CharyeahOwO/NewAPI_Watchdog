@@ -45,6 +45,7 @@ import { StatusBadge } from "@/components/status-badge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Combobox } from "@/components/ui/combobox"
 import {
   Dialog,
   DialogContent,
@@ -182,7 +183,7 @@ function App() {
   const token = session.token
   const needsSetup = !!session.token && bootstrap.data ? !bootstrap.data.setup_completed : false
   const runMutation = useMutation({
-    mutationFn: () => api.discoverChannels(token, header),
+    mutationFn: () => api.runProbe(token, header),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["status"] })
       queryClient.invalidateQueries({ queryKey: ["channels"] })
@@ -228,9 +229,9 @@ function App() {
 
   return (
     <div className="console-shell min-h-screen">
-      <aside className="fixed inset-y-0 left-0 hidden w-64 border-r bg-background/80 px-4 py-5 backdrop-blur-xl lg:block">
+      <aside className="fixed inset-y-0 left-0 hidden w-56 border-r bg-muted/45 px-3 py-4 backdrop-blur-xl lg:block">
         <div className="flex items-center gap-3 px-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-foreground text-background">
+          <div className="flex h-9 w-9 items-center justify-center rounded-2xl border bg-foreground text-background shadow-sm">
             <Terminal className="h-4 w-4" />
           </div>
           <div>
@@ -238,14 +239,14 @@ function App() {
             <div className="text-xs text-muted-foreground">旁路健康控制台</div>
           </div>
         </div>
-        <nav className="mt-8 space-y-1">
+        <nav className="mt-7 space-y-1">
           {navItems.map((item) => (
             <button
               key={item.path}
               onClick={() => navigate(item.path)}
               className={cn(
-                "flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-                path === item.path && "bg-foreground text-background hover:bg-foreground hover:text-background",
+                "flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm text-muted-foreground transition-colors hover:bg-background hover:text-foreground",
+                path === item.path && "bg-background text-foreground shadow-sm ring-1 ring-border hover:bg-background",
               )}
             >
               <item.icon className="h-4 w-4" />
@@ -255,17 +256,17 @@ function App() {
         </nav>
       </aside>
 
-      <div className="lg:pl-64">
-        <header className="sticky top-0 z-30 border-b bg-background/82 backdrop-blur-xl">
-          <div className="px-4 py-3 sm:px-5 sm:py-4 lg:px-8">
+      <div className="lg:pl-56">
+        <header className="sticky top-0 z-30 border-b bg-background/78 backdrop-blur-xl">
+          <div className="px-4 py-3 sm:px-5 lg:px-6">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                <div className="inline-flex h-9 flex-wrap items-center gap-2 rounded-full border bg-card px-3 text-sm text-muted-foreground shadow-sm">
                   <span>控制台</span>
                   <ChevronRight className="h-3.5 w-3.5" />
                   <span className="text-foreground">{navItems.find((item) => item.path === path)?.label || "总览"}</span>
                 </div>
-                <h1 className="mt-0.5 break-words text-lg font-semibold tracking-tight sm:text-xl">
+                <h1 className="mt-1.5 break-words text-lg font-semibold tracking-tight sm:text-xl">
                   {bootstrap.data?.title || "NewAPI Channel Watchdog"}
                 </h1>
               </div>
@@ -288,7 +289,7 @@ function App() {
                   key={item.path}
                   onClick={() => navigate(item.path)}
                   className={cn(
-                    "flex flex-none items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors",
+                    "flex flex-none items-center gap-2 rounded-2xl border px-3 py-2 text-sm transition-colors",
                     path === item.path
                       ? "border-foreground bg-foreground text-background"
                       : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -301,7 +302,7 @@ function App() {
             </nav>
           </div>
         </header>
-        <main className="px-4 py-5 sm:px-5 lg:px-8">
+        <main className="px-4 py-5 sm:px-5 lg:px-6">
           <RunFeedback mutation={runMutation} />
           {content}
         </main>
@@ -648,9 +649,9 @@ function ChannelsPage({ token, header }: ProtectedProps) {
         header: "",
         cell: ({ row }) => (
           <div className="flex justify-end gap-2">
-            <Button size="sm" variant="outline" onClick={() => setAction({ type: "probe", channel: row.original })}>探测</Button>
-            <Button size="sm" variant="outline" onClick={() => setAction({ type: "disable", channel: row.original })}>禁用</Button>
-            <Button size="sm" variant="outline" onClick={() => setAction({ type: "enable", channel: row.original })}>启用</Button>
+            <Button className="rounded-full" size="sm" variant="outline" onClick={() => setAction({ type: "probe", channel: row.original })}>探测</Button>
+            <Button className="rounded-full" size="sm" variant="outline" onClick={() => setAction({ type: "disable", channel: row.original })}>禁用</Button>
+            <Button className="rounded-full" size="sm" variant="outline" onClick={() => setAction({ type: "enable", channel: row.original })}>启用</Button>
           </div>
         ),
       },
@@ -660,7 +661,7 @@ function ChannelsPage({ token, header }: ProtectedProps) {
 
   return (
     <div className="space-y-6">
-      <PageHead eyebrow="渠道" title="渠道管理" description="查看渠道健康、错误和延迟，并执行手动探测、禁用、恢复操作。" />
+      <PageHead eyebrow="渠道" title="渠道" description="查看渠道健康、错误和延迟，并执行手动探测、禁用、恢复操作。" />
       <DataTable columns={columns} data={channels.data || []} searchKey="name" searchPlaceholder="搜索渠道名称" />
       {toggleMutation.error ? <p className="text-sm text-destructive">{toggleMutation.error.message}</p> : null}
       <Dialog open={!!action} onOpenChange={(open) => !open && setAction(null)}>
@@ -907,7 +908,7 @@ function SetupWizard({ token, header, username, onDone }: { token: string; heade
     },
   })
   const runMutation = useMutation({
-    mutationFn: () => api.runProbe(token, header),
+    mutationFn: () => api.discoverChannels(token, header),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["status"] })
       queryClient.invalidateQueries({ queryKey: ["channels"] })
@@ -1167,16 +1168,22 @@ function SelectField({
   options: Array<{ value: string; label: string }>
 }) {
   return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
-      <select className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm" {...form.register(name)}>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </div>
+    <Controller
+      control={form.control}
+      name={name}
+      render={({ field }) => (
+        <div className="space-y-2">
+          <Label>{label}</Label>
+          <Combobox
+            value={field.value}
+            onValueChange={field.onChange}
+            options={options}
+            placeholder={`选择${label}`}
+            searchPlaceholder={`搜索${label}`}
+          />
+        </div>
+      )}
+    />
   )
 }
 
