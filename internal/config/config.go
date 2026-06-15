@@ -15,6 +15,7 @@ type Config struct {
 	Discovery DiscoveryConfig `json:"discovery" yaml:"discovery"`
 	Probe     ProbeConfig     `json:"probe" yaml:"probe"`
 	NewAPI    NewAPIConfig    `json:"newapi" yaml:"newapi"`
+	Setup     SetupConfig     `json:"setup" yaml:"setup"`
 	Policy    PolicyConfig    `json:"policy" yaml:"policy"`
 }
 
@@ -57,6 +58,7 @@ type ProbeTarget struct {
 type NewAPIConfig struct {
 	BaseURL          string            `json:"base_url" yaml:"base_url"`
 	AdminToken       string            `json:"admin_token" yaml:"admin_token"`
+	AdminUserID      string            `json:"admin_user_id" yaml:"admin_user_id"`
 	AdminTokenHeader string            `json:"admin_token_header" yaml:"admin_token_header"`
 	AdminTokenPrefix string            `json:"admin_token_prefix" yaml:"admin_token_prefix"`
 	TimeoutSeconds   int               `json:"timeout_seconds" yaml:"timeout_seconds"`
@@ -74,6 +76,10 @@ type ActionTemplate struct {
 	Path              string         `json:"path" yaml:"path"`
 	Body              map[string]any `json:"body" yaml:"body"`
 	FetchBeforeUpdate bool           `json:"fetch_before_update" yaml:"fetch_before_update"`
+}
+
+type SetupConfig struct {
+	Completed bool `json:"completed" yaml:"completed"`
 }
 
 type PolicyConfig struct {
@@ -118,11 +124,12 @@ func Default() Config {
 			ModelQueryParam: "model",
 			PerChannel:      map[string]ProbeTarget{},
 		},
-		NewAPI: NewAPIConfig{
-			BaseURL:          "http://newapi:3000",
-			AdminTokenHeader: "Authorization",
-			AdminTokenPrefix: "Bearer",
-			TimeoutSeconds:   20,
+	NewAPI: NewAPIConfig{
+		BaseURL:          "http://newapi:3000",
+		AdminTokenHeader: "Authorization",
+		AdminTokenPrefix: "Bearer",
+		AdminUserID:      "1",
+		TimeoutSeconds:   20,
 			VerifySSL:        true,
 			Headers:          map[string]string{},
 			Endpoints: map[string]string{
@@ -202,6 +209,9 @@ func MergeSecrets(next Config, current Config) Config {
 	}
 	if next.NewAPI.AdminToken == "" {
 		next.NewAPI.AdminToken = current.NewAPI.AdminToken
+	}
+	if next.NewAPI.AdminUserID == "" {
+		next.NewAPI.AdminUserID = current.NewAPI.AdminUserID
 	}
 	return next
 }

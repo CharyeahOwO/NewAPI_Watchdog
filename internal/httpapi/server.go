@@ -34,6 +34,7 @@ type settingsResponse struct {
 	Config        config.Config `json:"config"`
 	HasWriteToken bool          `json:"has_write_token"`
 	HasAdminToken bool          `json:"has_admin_token"`
+	NeedsSetup    bool          `json:"needs_setup"`
 }
 
 type loginRequest struct {
@@ -123,6 +124,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		"dry_run":            cfg.Policy.DryRun,
 		"auth_initialized":   cfg.Auth.Username != "" && cfg.Auth.PasswordHash != "",
 		"username":           cfg.Auth.Username,
+		"setup_completed":    cfg.Setup.Completed,
 	})
 }
 
@@ -286,6 +288,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		Config:        config.Sanitize(cfg),
 		HasWriteToken: cfg.Auth.WriteToken != "",
 		HasAdminToken: cfg.NewAPI.AdminToken != "",
+		NeedsSetup:    !cfg.Setup.Completed || cfg.Auth.Username == "" || cfg.Auth.PasswordHash == "" || cfg.NewAPI.BaseURL == "",
 	})
 }
 
@@ -307,6 +310,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		Config:        config.Sanitize(next),
 		HasWriteToken: next.Auth.WriteToken != "",
 		HasAdminToken: next.NewAPI.AdminToken != "",
+		NeedsSetup:    !next.Setup.Completed || next.Auth.Username == "" || next.Auth.PasswordHash == "" || next.NewAPI.BaseURL == "",
 	})
 }
 

@@ -1,6 +1,7 @@
 import * as React from "react"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import type { UseMutationResult } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 import { Controller, useForm } from "react-hook-form"
 import {
@@ -54,7 +55,6 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { api, clearStoredSession, getStoredSession, setStoredSession } from "@/lib/api"
@@ -65,6 +65,7 @@ import type {
   ModelView,
   PolicyConfig,
   RunView,
+  RunResult,
   SettingsResponse,
   StatusEvent,
   StatusSnapshot,
@@ -117,6 +118,7 @@ const defaultRulesForm: RulesForm = {
 const settingsSchema = z.object({
   newapi_base_url: z.string().min(1),
   admin_token: z.string(),
+  admin_user_id: z.string(),
   admin_token_header: z.string().min(1),
   admin_token_prefix: z.string(),
   timeout_seconds: z.coerce.number().int().min(1),
@@ -135,6 +137,7 @@ const settingsSchema = z.object({
 })
 
 type SettingsForm = z.infer<typeof settingsSchema>
+type SetupStep = "connection" | "policy" | "finish"
 
 function App() {
   const [path, setPath] = React.useState(() => normalizePath(window.location.pathname))
@@ -171,9 +174,16 @@ function App() {
 
   const header = bootstrap.data?.write_token_header || "X-Watchdog-Token"
   const token = session.token
+  const needsSetup = !!session.token && bootstrap.data ? !bootstrap.data.setup_completed : false
   const runMutation = useMutation({
     mutationFn: () => api.runProbe(token, header),
-    onSuccess: () => queryClient.invalidateQueries(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["status"] })
+      queryClient.invalidateQueries({ queryKey: ["channels"] })
+      queryClient.invalidateQueries({ queryKey: ["models"] })
+      queryClient.invalidateQueries({ queryKey: ["events"] })
+      queryClient.invalidateQueries({ queryKey: ["runs"] })
+    },
   })
 
   if (!session.token) {
@@ -185,6 +195,10 @@ function App() {
         onLogin={saveSession}
       />
     )
+  }
+
+  if (needsSetup) {
+    return <SetupWizard token={token} header={header} username={session.username || "admin"} onDone={() => queryClient.invalidateQueries()} />
   }
 
   const content = (() => {
@@ -281,9 +295,54 @@ function App() {
             </nav>
           </div>
         </header>
-        <main className="px-4 py-5 sm:px-5 lg:px-8">{content}</main>
+        <main className="px-4 py-5 sm:px-5 lg:px-8">
+          <RunFeedback mutation={runMutation} />
+          {content}
+        </main>
       </div>
     </div>
+  )
+}
+
+function RunFeedback({ mutation }: { mutation: UseMutationResult<RunResult, Error, void> }) {
+  if (mutation.isIdle) return null
+  if (mutation.isPending) {
+    return (
+      <Card className="mb-5 border-muted bg-muted/35">
+        <CardContent className="flex items-center gap-3 p-4 text-sm text-muted-foreground">
+          <RefreshCw className="h-4 w-4 animate-spin" />
+          正在向 NewAPI 拉取渠道并执行巡检。
+        </CardContent>
+      </Card>
+    )
+  }
+  if (mutation.isError) {
+    return (
+      <Card className="mb-5 border-destructive/30 bg-destructive/5">
+        <CardContent className="flex items-start gap-3 p-4 text-sm text-destructive">
+          <CircleAlert className="mt-0.5 h-4 w-4 flex-none" />
+          <div>
+            <div className="font-medium">巡检失败</div>
+            <div className="mt-1 break-words">{mutation.error.message}</div>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+  const result = mutation.data
+  return (
+    <Card className="mb-5 border-emerald-200 bg-emerald-50/70">
+      <CardContent className="flex items-start gap-3 p-4 text-sm text-emerald-900">
+        <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none" />
+        <div>
+          <div className="font-medium">巡检完成</div>
+          <div className="mt-1">
+            发现 {result.channels_seen} 个渠道，探测 {result.probes_total} 次，成功 {result.probes_ok} 次，失败 {result.probes_failed} 次。
+          </div>
+          {result.channels_seen === 0 ? <div className="mt-1">没有渠道通常表示 NewAPI 管理接口没有返回渠道，或当前管理 Token 权限不够。</div> : null}
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -705,49 +764,20 @@ function SettingsPage({ token, header }: ProtectedProps) {
   })
   return (
     <div className="space-y-6">
-      <PageHead eyebrow="设置" title="系统设置" description="NewAPI 连接、发现来源和探测模式都在后台保存，部署后直接在这里维护。" />
+      <PageHead eyebrow="设置" title="系统设置" description="连接、探测、自动动作。" />
       <Card>
         <CardHeader>
           <CardTitle>连接与发现</CardTitle>
-          <CardDescription>NewAPI 管理 Token 留空表示保留当前值，不会被接口回显。</CardDescription>
         </CardHeader>
         <CardContent>
-          <form className="grid gap-5 lg:grid-cols-2" onSubmit={form.handleSubmit((values) => mutation.mutate(values))}>
-            <InputField label="NewAPI 地址" name="newapi_base_url" form={form} />
-            <InputField label="NewAPI 管理 Token" name="admin_token" form={form} type="password" placeholder={settings.data?.has_admin_token ? "已设置，留空保留" : "未设置"} />
-            <InputField label="管理 Token 请求头" name="admin_token_header" form={form} />
-            <InputField label="管理 Token 前缀" name="admin_token_prefix" form={form} />
-            <SelectField
-              label="发现来源"
-              name="discovery_source"
-              form={form}
-              options={[
-                { value: "api", label: "API 接口" },
-                { value: "sqlite", label: "只读 SQLite" },
-                { value: "api_then_sqlite", label: "先 API 后 SQLite" },
-              ]}
-            />
-            <InputField label="发现分页大小" name="discovery_page_size" form={form} type="number" />
-            <InputField label="只读 SQLite 路径" name="discovery_sqlite_path" form={form} />
-            <SelectField
-              label="探测模式"
-              name="probe_mode"
-              form={form}
-              options={[
-                { value: "channel", label: "按渠道" },
-                { value: "test_model", label: "按测试模型" },
-                { value: "models", label: "按模型列表" },
-              ]}
-            />
-            <InputField label="模型查询参数" name="model_query_param" form={form} />
-            <InputField label="请求超时（秒）" name="timeout_seconds" form={form} type="number" />
-            <InputField label="启用状态值" name="enabled_status_value" form={form} type="number" />
-            <InputField label="禁用状态值" name="disabled_status_value" form={form} type="number" />
-            <TextareaField label="SQLite 查询" name="discovery_sqlite_query" form={form} />
-            <TextareaField label="额外请求头 JSON" name="headers_json" form={form} />
-            <TextareaField label="端点模板 JSON" name="endpoints_json" form={form} />
-            <TextareaField label="禁用请求体 JSON" name="disable_body_json" form={form} />
-            <TextareaField label="恢复请求体 JSON" name="enable_body_json" form={form} />
+          <form className="space-y-8" onSubmit={form.handleSubmit((values) => mutation.mutate(values))}>
+            <ConnectionFields form={form} hasAdminToken={settings.data?.has_admin_token} />
+            <details className="rounded-lg border p-4">
+              <summary className="cursor-pointer text-sm font-medium">高级配置</summary>
+              <div className="mt-5 grid gap-5 lg:grid-cols-2">
+                <AdvancedSettingsFields form={form} />
+              </div>
+            </details>
             <div className="lg:col-span-2 flex justify-end">
               <Button disabled={!token || mutation.isPending}>{mutation.isPending ? "保存中" : "保存设置"}</Button>
             </div>
@@ -756,6 +786,219 @@ function SettingsPage({ token, header }: ProtectedProps) {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+function SetupWizard({ token, header, username, onDone }: { token: string; header: string; username: string; onDone: () => void }) {
+  const queryClient = useQueryClient()
+  const [step, setStep] = React.useState<SetupStep>("connection")
+  const settings = useQuery({
+    queryKey: ["settings", token],
+    queryFn: () => api.settings(token, header),
+    enabled: !!token,
+    refetchInterval: false,
+  })
+  const form = useForm<SettingsForm>({
+    resolver: zodResolver(settingsSchema),
+    values: settings.data ? toSettingsForm(settings.data) : undefined,
+  })
+  const rules = useQuery({ queryKey: ["rules", token], queryFn: () => api.rules(token, header), enabled: !!token, refetchInterval: false })
+  const rulesForm = useForm<RulesForm>({
+    resolver: zodResolver(rulesSchema),
+    defaultValues: defaultRulesForm,
+    values: rules.data ? toRulesForm(rules.data) : undefined,
+  })
+  const saveMutation = useMutation({
+    mutationFn: (payload: { values: SettingsForm; setupCompleted?: boolean; next?: SetupStep | "done" }) => {
+      if (!settings.data) throw new Error("settings not loaded")
+      return api.saveSettings(fromSettingsForm(payload.values, settings.data.config, { setupCompleted: payload.setupCompleted }), token, header)
+    },
+    onSuccess: (_response, payload) => {
+      queryClient.invalidateQueries()
+      if (payload.next === "policy" || payload.next === "finish") setStep(payload.next)
+      if (payload.next === "done") onDone()
+    },
+  })
+  const rulesMutation = useMutation({
+    mutationFn: (values: RulesForm) => api.saveRules(fromRulesForm(values), token, header),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["rules", token] })
+      setStep("finish")
+    },
+  })
+  const runMutation = useMutation({
+    mutationFn: () => api.runProbe(token, header),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["status"] })
+      queryClient.invalidateQueries({ queryKey: ["channels"] })
+      queryClient.invalidateQueries({ queryKey: ["models"] })
+      queryClient.invalidateQueries({ queryKey: ["events"] })
+      queryClient.invalidateQueries({ queryKey: ["runs"] })
+    },
+  })
+
+  function submitCurrent() {
+    form.handleSubmit((values) =>
+      saveMutation.mutate({
+        values,
+        setupCompleted: step === "finish",
+        next: step === "connection" ? "policy" : step === "policy" ? "finish" : "done",
+      }),
+    )()
+  }
+
+  function saveThenTest() {
+    form.handleSubmit((values) => {
+      saveMutation.mutate({ values }, {
+        onSuccess: () => runMutation.mutate(),
+      })
+    })()
+  }
+
+  return (
+    <main className="console-shell min-h-screen px-4 py-8">
+      <section className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[280px_1fr]">
+        <aside className="rounded-lg border bg-background p-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-foreground text-background">
+              <Terminal className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="text-sm font-semibold">NewAPI Watchdog</div>
+              <div className="text-xs text-muted-foreground">{username}</div>
+            </div>
+          </div>
+          <div className="mt-8 space-y-2">
+            <StepItem active={step === "connection"} done={step !== "connection"} index="1" label="连接 NewAPI" />
+            <StepItem active={step === "policy"} done={step === "finish"} index="2" label="运行策略" />
+            <StepItem active={step === "finish"} done={false} index="3" label="完成" />
+          </div>
+        </aside>
+
+        <Card className="min-h-[560px]">
+          <CardHeader>
+            <CardTitle>{step === "connection" ? "连接 NewAPI" : step === "policy" ? "运行策略" : "完成初始化"}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {step === "connection" ? (
+              <div className="space-y-6">
+                <div className="grid gap-5 lg:grid-cols-2">
+                  <ConnectionFields form={form} hasAdminToken={settings.data?.has_admin_token} />
+                </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button variant="outline" onClick={saveThenTest} disabled={runMutation.isPending || saveMutation.isPending || settings.isLoading}>
+                    {runMutation.isPending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                    测试连接
+                  </Button>
+                  <Button onClick={submitCurrent} disabled={saveMutation.isPending || settings.isLoading}>
+                    {saveMutation.isPending ? "保存中" : "下一步"}
+                  </Button>
+                </div>
+                <RunFeedback mutation={runMutation} />
+              </div>
+            ) : null}
+
+            {step === "policy" ? (
+              <div className="space-y-6">
+                <div className="grid gap-5 lg:grid-cols-2">
+                  <NumberField label="巡检间隔（秒）" name="interval_seconds" form={rulesForm} />
+                  <NumberField label="失败阈值" name="failure_threshold" form={rulesForm} />
+                  <NumberField label="恢复阈值" name="recovery_threshold" form={rulesForm} />
+                  <SwitchField label="模拟运行" name="dry_run" form={rulesForm} />
+                </div>
+                <div className="flex justify-between">
+                  <Button variant="outline" onClick={() => setStep("connection")}>上一步</Button>
+                  <Button onClick={() => rulesForm.handleSubmit((values) => rulesMutation.mutate(values))()} disabled={rulesMutation.isPending || rules.isLoading}>
+                    {rulesMutation.isPending ? "保存中" : "下一步"}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
+            {step === "finish" ? (
+              <div className="space-y-6">
+                <div className="rounded-lg border bg-muted/35 p-5">
+                  <div className="flex items-center gap-3">
+                    <CheckCircle2 className="h-5 w-5" />
+                    <div className="font-medium">初始化完成</div>
+                  </div>
+                </div>
+                <div className="flex justify-between">
+                  <Button variant="outline" onClick={() => setStep("policy")}>上一步</Button>
+                  <Button onClick={submitCurrent} disabled={saveMutation.isPending}>
+                    进入控制台
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
+            {saveMutation.error ? <p className="text-sm text-destructive">{saveMutation.error.message}</p> : null}
+            {rulesMutation.error ? <p className="text-sm text-destructive">{rulesMutation.error.message}</p> : null}
+          </CardContent>
+        </Card>
+      </section>
+    </main>
+  )
+}
+
+function StepItem({ active, done, index, label }: { active: boolean; done: boolean; index: string; label: string }) {
+  return (
+    <div className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm", active ? "bg-foreground text-background" : "text-muted-foreground")}>
+      <span className={cn("flex h-6 w-6 items-center justify-center rounded-full border text-xs", done && "bg-emerald-600 text-white")}>
+        {done ? <CheckCircle2 className="h-3.5 w-3.5" /> : index}
+      </span>
+      {label}
+    </div>
+  )
+}
+
+function ConnectionFields({ form, hasAdminToken }: { form: FormLike; hasAdminToken?: boolean }) {
+  return (
+    <>
+      <InputField label="NewAPI 地址" name="newapi_base_url" form={form} placeholder="http://1Panel-new-api-u10x:3000" />
+      <InputField label="管理 Token" name="admin_token" form={form} type="password" placeholder={hasAdminToken ? "已设置" : ""} />
+      <InputField label="管理员用户 ID（默认 1）" name="admin_user_id" form={form} placeholder="1" />
+      <InputField label="请求超时（秒）" name="timeout_seconds" form={form} type="number" />
+    </>
+  )
+}
+
+function AdvancedSettingsFields({ form }: { form: FormLike }) {
+  return (
+    <>
+      <InputField label="管理 Token 请求头" name="admin_token_header" form={form} />
+      <InputField label="管理 Token 前缀" name="admin_token_prefix" form={form} />
+      <SelectField
+        label="发现来源"
+        name="discovery_source"
+        form={form}
+        options={[
+          { value: "api", label: "API 接口" },
+          { value: "sqlite", label: "只读 SQLite" },
+          { value: "api_then_sqlite", label: "先 API 后 SQLite" },
+        ]}
+      />
+      <InputField label="发现分页大小" name="discovery_page_size" form={form} type="number" />
+      <InputField label="只读 SQLite 路径" name="discovery_sqlite_path" form={form} />
+      <SelectField
+        label="探测模式"
+        name="probe_mode"
+        form={form}
+        options={[
+          { value: "channel", label: "按渠道" },
+          { value: "test_model", label: "按测试模型" },
+          { value: "models", label: "按模型列表" },
+        ]}
+      />
+      <InputField label="模型查询参数" name="model_query_param" form={form} />
+      <InputField label="启用状态值" name="enabled_status_value" form={form} type="number" />
+      <InputField label="禁用状态值" name="disabled_status_value" form={form} type="number" />
+      <TextareaField label="SQLite 查询" name="discovery_sqlite_query" form={form} />
+      <TextareaField label="额外请求头 JSON" name="headers_json" form={form} />
+      <TextareaField label="端点模板 JSON" name="endpoints_json" form={form} />
+      <TextareaField label="禁用请求体 JSON" name="disable_body_json" form={form} />
+      <TextareaField label="恢复请求体 JSON" name="enable_body_json" form={form} />
+    </>
   )
 }
 
@@ -861,6 +1104,7 @@ function toSettingsForm(response: SettingsResponse): SettingsForm {
   return {
     newapi_base_url: cfg.newapi.base_url,
     admin_token: "",
+    admin_user_id: cfg.newapi.admin_user_id || "1",
     admin_token_header: cfg.newapi.admin_token_header,
     admin_token_prefix: cfg.newapi.admin_token_prefix,
     timeout_seconds: cfg.newapi.timeout_seconds,
@@ -879,9 +1123,17 @@ function toSettingsForm(response: SettingsResponse): SettingsForm {
   }
 }
 
-function fromSettingsForm(values: SettingsForm, current: SettingsResponse["config"]): SettingsResponse["config"] {
+function fromSettingsForm(
+  values: SettingsForm,
+  current: SettingsResponse["config"],
+  options: { setupCompleted?: boolean } = {},
+): SettingsResponse["config"] {
   return {
     ...current,
+    setup: {
+      ...current.setup,
+      completed: options.setupCompleted ?? current.setup.completed,
+    },
     discovery: {
       ...current.discovery,
       source: values.discovery_source,
@@ -898,6 +1150,7 @@ function fromSettingsForm(values: SettingsForm, current: SettingsResponse["confi
       ...current.newapi,
       base_url: values.newapi_base_url,
       admin_token: values.admin_token,
+      admin_user_id: values.admin_user_id || "1",
       admin_token_header: values.admin_token_header,
       admin_token_prefix: values.admin_token_prefix,
       timeout_seconds: Number(values.timeout_seconds),

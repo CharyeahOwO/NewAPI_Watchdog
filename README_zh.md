@@ -65,6 +65,13 @@ go run ./cmd/watchdog
 3. 登录后进入 **设置** 页面，配置 NewAPI 地址和具有管理权限的 Admin Token。
 4. 进入 **策略** 页面，配置失败/恢复阈值（若需开启真实停用渠道动作，请关闭 `dry-run` 模式）。
 
+### 5. 1Panel / Docker 连接说明
+
+- `NewAPI 地址` 填的是 **Watchdog 容器到 NewAPI 容器** 的地址，不是你浏览器访问的地址。
+- 如果两个容器在同一个 Docker 网络里，推荐直接填容器名，例如 `http://1Panel-new-api-u10x:3000`。
+- `管理员用户 ID` 默认填 `1`。这是 NewAPI 后台管理接口常用的用户 ID。
+- `管理 Token` 填 NewAPI 的后台访问令牌，不是普通前台访问 token。
+
 ## 开发与构建
 
 **启动后端：**

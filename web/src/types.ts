@@ -119,6 +119,7 @@ export type RuntimeConfig = {
   newapi: {
     base_url: string
     admin_token: string
+    admin_user_id: string
     admin_token_header: string
     admin_token_prefix: string
     timeout_seconds: number
@@ -129,6 +130,9 @@ export type RuntimeConfig = {
     disabled_status_value: number
     disable_action: ActionTemplate
     enable_action: ActionTemplate
+  }
+  setup: {
+    completed: boolean
   }
   policy: PolicyConfig
 }
@@ -160,6 +164,7 @@ export type SettingsResponse = {
   config: RuntimeConfig
   has_write_token: boolean
   has_admin_token: boolean
+  needs_setup: boolean
 }
 
 export type Bootstrap = {
@@ -167,6 +172,7 @@ export type Bootstrap = {
   write_token_header: string
   dry_run: boolean
   auth_initialized: boolean
+  setup_completed: boolean
   username: string
 }
 

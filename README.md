@@ -70,6 +70,13 @@ After starting the service:
 3. Navigate to **Settings** to configure your NewAPI Base URL and Admin Token.
 4. Navigate to **Rules** to configure failure/recovery thresholds and disable `dry-run` if actual auto-actions are required.
 
+### 4. 1Panel / Docker Notes
+
+- `NewAPI Base URL` is the URL reached from the Watchdog container to the NewAPI container, not necessarily the browser-facing URL.
+- If both containers share one Docker network, use the NewAPI container name, for example `http://1Panel-new-api-u10x:3000`.
+- `Admin User ID` defaults to `1`.
+- `Admin Token` must be a NewAPI management access token, not a normal user API key.
+
 ## Development
 
 **Backend:**

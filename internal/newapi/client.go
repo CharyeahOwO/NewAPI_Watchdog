@@ -264,6 +264,9 @@ func (c *Client) requestJSON(ctx context.Context, method, endpoint string, value
 	for key, value := range c.cfg.NewAPI.Headers {
 		req.Header.Set(key, value)
 	}
+	if c.cfg.NewAPI.AdminUserID != "" {
+		req.Header.Set("New-Api-User", c.cfg.NewAPI.AdminUserID)
+	}
 	if c.cfg.NewAPI.AdminToken != "" {
 		value := c.cfg.NewAPI.AdminToken
 		if c.cfg.NewAPI.AdminTokenPrefix != "" {

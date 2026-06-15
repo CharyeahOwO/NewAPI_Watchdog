@@ -9,6 +9,9 @@ auth:
   write_token: change-me
   write_token_header: X-Watchdog-Token
 
+setup:
+  completed: false
+
 database:
   sqlite_path: data/watchdog.sqlite3
 
@@ -28,6 +31,7 @@ probe:
 newapi:
   base_url: http://newapi:3000
   admin_token: ""
+  admin_user_id: "1"
   admin_token_header: Authorization
   admin_token_prefix: Bearer
   timeout_seconds: 20
