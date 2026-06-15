@@ -15,6 +15,7 @@ export type ChannelView = {
   watchdog_status: ChannelStatus
   models: string[]
   test_model?: string
+  probe_models?: string[]
   group_name: string
   auto_ban: boolean | null
   newapi_disabled: boolean

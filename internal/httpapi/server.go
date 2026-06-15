@@ -52,7 +52,8 @@ type loginResponse struct {
 }
 
 type channelProbeSettingsRequest struct {
-	Enabled bool `json:"enabled"`
+	Enabled bool   `json:"enabled"`
+	Model   string `json:"model"`
 }
 
 type channelProbeRequest struct {
@@ -378,7 +379,15 @@ func (s *Server) putChannelProbeSettings(w http.ResponseWriter, r *http.Request)
 	}
 	key := strconv.FormatInt(channelID, 10)
 	target := next.Probe.PerChannel[key]
+	model := strings.TrimSpace(payload.Model)
+	if payload.Enabled && model == "" {
+		writeError(w, http.StatusBadRequest, errors.New("please select model first"))
+		return
+	}
 	target.Enabled = &payload.Enabled
+	if model != "" {
+		target.Models = []string{model}
+	}
 	next.Probe.PerChannel[key] = target
 	if err := s.applyConfig(r.Context(), next); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -498,13 +507,18 @@ func (s *Server) applyConfig(ctx context.Context, cfg config.Config) error {
 func (s *Server) applyChannelProbeSettings(channels []store.ChannelView) {
 	cfg := s.currentConfig()
 	for index := range channels {
-		channels[index].WatchdogEnabled = true
+		channels[index].WatchdogEnabled = false
 		if cfg.Probe.PerChannel == nil {
 			continue
 		}
 		target, ok := cfg.Probe.PerChannel[strconv.FormatInt(channels[index].ChannelID, 10)]
-		if ok && target.Enabled != nil {
-			channels[index].WatchdogEnabled = *target.Enabled
+		if !ok {
+			continue
+		}
+		channels[index].ProbeModels = append([]string(nil), target.Models...)
+		channels[index].WatchdogEnabled = len(target.Models) > 0
+		if target.Enabled != nil {
+			channels[index].WatchdogEnabled = *target.Enabled && len(target.Models) > 0
 		}
 	}
 }

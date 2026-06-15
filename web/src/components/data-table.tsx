@@ -11,9 +11,15 @@ import {
   useReactTable,
 } from "@tanstack/react-table"
 import { ChevronLeft, ChevronRight, Search } from "lucide-react"
+import { Combobox } from "@/components/ui/combobox"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+
+const pageSizeOptions = [10, 20, 50, 100].map((pageSize) => ({
+  value: String(pageSize),
+  label: String(pageSize),
+}))
 
 type DataTableProps<TData, TValue> = {
   columns: ColumnDef<TData, TValue>[]
@@ -95,10 +101,25 @@ export function DataTable<TData, TValue>({
           </TableBody>
         </Table>
       </div>
-      <div className="flex items-center justify-between border-t border-stone-100 px-4 py-3 text-sm text-stone-500">
-        <span>
+      <div className="flex flex-col gap-3 border-t border-stone-100 px-4 py-3 text-sm text-stone-500 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-3">
+          <span>
           当前第 {table.getState().pagination.pageIndex + 1} 页
-        </span>
+          </span>
+          <div className="flex items-center gap-2 whitespace-nowrap">
+            每页
+            <Combobox
+              className="w-24"
+              value={String(table.getState().pagination.pageSize)}
+              onValueChange={(value) => table.setPageSize(Math.min(Number(value), 100))}
+              options={pageSizeOptions}
+              placeholder="10"
+              side="top"
+              searchable={false}
+            />
+            条
+          </div>
+        </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="icon" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>
             <ChevronLeft className="h-4 w-4" />

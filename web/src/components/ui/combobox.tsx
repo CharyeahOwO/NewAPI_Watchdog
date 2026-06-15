@@ -17,6 +17,11 @@ type ComboboxProps = {
   searchPlaceholder?: string
   emptyText?: string
   className?: string
+  contentClassName?: string
+  trigger?: React.ReactNode
+  ariaLabel?: string
+  side?: "top" | "bottom"
+  searchable?: boolean
 }
 
 export function Combobox({
@@ -27,6 +32,11 @@ export function Combobox({
   searchPlaceholder = "搜索选项",
   emptyText = "没有匹配项",
   className,
+  contentClassName,
+  trigger,
+  ariaLabel,
+  side = "bottom",
+  searchable = true,
 }: ComboboxProps) {
   const [open, setOpen] = React.useState(false)
   const [query, setQuery] = React.useState("")
@@ -52,6 +62,7 @@ export function Combobox({
       <button
         type="button"
         role="combobox"
+        aria-label={ariaLabel}
         aria-expanded={open}
         className={cn(
           "flex h-10 w-full items-center justify-between rounded-xl border border-input bg-card px-3 text-left text-sm shadow-sm transition-colors",
@@ -60,22 +71,34 @@ export function Combobox({
         )}
         onClick={() => setOpen((current) => !current)}
       >
-        <span className="min-w-0 truncate">{selected?.label || placeholder}</span>
-        <ChevronsUpDown className="ml-2 h-4 w-4 flex-none text-muted-foreground" />
+        {trigger || (
+          <>
+            <span className="min-w-0 truncate">{selected?.label || placeholder}</span>
+            <ChevronsUpDown className="ml-2 h-4 w-4 flex-none text-muted-foreground" />
+          </>
+        )}
       </button>
 
       {open ? (
-        <div className="absolute left-0 right-0 top-[calc(100%+0.35rem)] z-50 overflow-hidden rounded-xl border bg-card shadow-xl shadow-black/10">
-          <div className="flex items-center gap-2 border-b px-3 py-2">
-            <Search className="h-4 w-4 text-muted-foreground" />
-            <input
-              className="h-8 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={searchPlaceholder}
-              autoFocus
-            />
-          </div>
+        <div
+          className={cn(
+            "absolute left-0 z-50 min-w-full overflow-hidden rounded-xl border bg-card shadow-xl shadow-black/10",
+            side === "top" ? "bottom-[calc(100%+0.35rem)]" : "top-[calc(100%+0.35rem)]",
+            contentClassName,
+          )}
+        >
+          {searchable ? (
+            <div className="flex items-center gap-2 border-b px-3 py-2">
+              <Search className="h-4 w-4 text-muted-foreground" />
+              <input
+                className="h-8 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={searchPlaceholder}
+                autoFocus
+              />
+            </div>
+          ) : null}
           <div className="max-h-64 overflow-auto p-1">
             {filtered.length ? (
               filtered.map((option) => (
@@ -94,8 +117,8 @@ export function Combobox({
                 >
                   <Check className={cn("h-4 w-4 flex-none", option.value === value ? "opacity-100" : "opacity-0")} />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate">{option.label}</span>
-                    {option.description ? <span className="block truncate text-xs opacity-70">{option.description}</span> : null}
+                    <span className="block whitespace-nowrap">{option.label}</span>
+                    {option.description ? <span className="block whitespace-nowrap text-xs opacity-70">{option.description}</span> : null}
                   </span>
                 </button>
               ))

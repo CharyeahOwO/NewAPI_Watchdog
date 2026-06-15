@@ -24,12 +24,32 @@
     --radius: 0.75rem; /* rounded-xl */
   }
 
+  .dark {
+    --background: 24 10% 8%;
+    --foreground: 35 18% 92%;
+    --card: 24 8% 12%;
+    --card-foreground: 35 18% 92%;
+    --primary: 35 18% 92%;
+    --primary-foreground: 24 10% 8%;
+    --secondary: 24 7% 16%;
+    --secondary-foreground: 35 18% 92%;
+    --muted: 24 7% 16%;
+    --muted-foreground: 28 7% 64%;
+    --accent: 24 7% 18%;
+    --accent-foreground: 35 18% 92%;
+    --destructive: 347 77% 58%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 24 7% 24%;
+    --input: 24 7% 24%;
+    --ring: 28 7% 58%;
+  }
+
   * {
     @apply border-border;
   }
 
   body {
-    @apply bg-background text-stone-800 antialiased;
+    @apply bg-background text-foreground antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
@@ -65,6 +85,46 @@
     background-color: hsl(24 6% 88%);
     color: hsl(24 10% 10%);
   }
+}
+
+.dark .border-stone-100,
+.dark .border-stone-200,
+.dark .border-stone-300 {
+  border-color: hsl(var(--border));
+}
+
+.dark .bg-white,
+.dark .bg-card {
+  background-color: hsl(var(--card));
+}
+
+.dark .bg-stone-50,
+.dark .bg-stone-50\/60,
+.dark .bg-stone-50\/70,
+.dark .bg-stone-100 {
+  background-color: hsl(var(--muted));
+}
+
+.dark [class*="bg-[#FDFCFB]"] {
+  background-color: hsl(var(--background) / 0.86);
+}
+
+.dark .text-stone-900,
+.dark .text-stone-800,
+.dark .text-stone-700 {
+  color: hsl(var(--foreground));
+}
+
+.dark .text-stone-600,
+.dark .text-stone-500,
+.dark .text-stone-400 {
+  color: hsl(var(--muted-foreground));
+}
+
+.dark .shadow-paper,
+.dark .shadow-lift,
+.dark .shadow-soft {
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.28), 0 10px 28px rgb(0 0 0 / 0.18);
 }
 
 @layer utilities {

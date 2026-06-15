@@ -15,9 +15,11 @@ import {
   Gauge,
   History,
   KeyRound,
+  Languages,
   LayoutDashboard,
   ListFilter,
   LogOut,
+  Palette,
   Play,
   RefreshCw,
   Settings,
@@ -61,7 +63,7 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { api, clearStoredSession, getStoredSession, setStoredSession } from "@/lib/api"
-import { cn, ms, percent } from "@/lib/utils"
+import { cn, percent, seconds } from "@/lib/utils"
 import type {
   AuthResponse,
   ChannelView,
@@ -73,18 +75,6 @@ import type {
   StatusEvent,
   StatusSnapshot,
 } from "@/types"
-
-const navItems = [
-  { path: "/dashboard", label: "总览", icon: LayoutDashboard },
-  { path: "/channels", label: "渠道", icon: Workflow },
-  { path: "/models", label: "模型", icon: Bot },
-  { path: "/events", label: "事件", icon: History },
-  { path: "/runs", label: "巡检", icon: Activity },
-  { path: "/rules", label: "策略", icon: SlidersHorizontal },
-  { path: "/settings", label: "设置", icon: Settings },
-]
-
-const UPSTREAM_MODEL_VALUE = "__upstream__"
 
 function formatLocalDateTime(value: string) {
   const date = new Date(value)
@@ -170,11 +160,124 @@ const settingsSchema = z.object({
 
 type SettingsForm = z.infer<typeof settingsSchema>
 type SetupStep = "connection" | "policy" | "finish"
+type Language = "zh" | "en"
+type ThemeMode = "light" | "dark"
+
+const messages = {
+  zh: {
+    navDashboard: "总览",
+    navChannels: "渠道",
+    navModels: "模型",
+    navEvents: "事件",
+    navRuns: "巡检",
+    navRules: "策略",
+    navSettings: "设置",
+    sidebarSubtitle: "旁路健康控制台",
+    console: "控制台",
+    dryRun: "模拟运行",
+    liveRun: "真实执行",
+    runNow: "立即巡检",
+    logout: "退出",
+    language: "语言",
+    theme: "主题",
+    themeLight: "浅色",
+    themeDark: "深色",
+    dashboardEyebrow: "总览",
+    dashboardTitle: "旁路健康总览",
+    dashboardDesc: "快速查看渠道可用性、故障数量和最近巡检结果。",
+    totalChannels: "总渠道",
+    healthy: "健康",
+    degradedRecovering: "降级/恢复",
+    downDisabled: "故障/禁用",
+    recentRuns: "最近巡检",
+    recentRunsDesc: "成功和失败探测数量的短期走势。",
+    statusDistribution: "状态分布",
+    statusDistributionDesc: "渠道状态机当前计数。",
+    modelHealth: "模型健康面",
+    modelHealthDesc: "按模型聚合的健康渠道和风险渠道。",
+    operationFailed: "操作失败",
+    fetchingChannels: "正在向 NewAPI 拉取渠道信息。",
+    discoveryComplete: "发现完成",
+    probeComplete: "巡检完成",
+    discoveredChannelsOnly: "发现 {channels} 个渠道，未执行渠道探测。",
+    probeSummary: "发现 {channels} 个渠道，探测 {total} 次，成功 {ok} 次，失败 {failed} 次。",
+    noChannelsHint: "没有渠道通常表示 NewAPI 管理接口没有返回渠道，或当前管理 Token 权限不够。",
+  },
+  en: {
+    navDashboard: "Dashboard",
+    navChannels: "Channels",
+    navModels: "Models",
+    navEvents: "Events",
+    navRuns: "Runs",
+    navRules: "Rules",
+    navSettings: "Settings",
+    sidebarSubtitle: "Sidecar health console",
+    console: "Console",
+    dryRun: "Dry run",
+    liveRun: "Live run",
+    runNow: "Run now",
+    logout: "Logout",
+    language: "Language",
+    theme: "Theme",
+    themeLight: "Light",
+    themeDark: "Dark",
+    dashboardEyebrow: "Dashboard",
+    dashboardTitle: "Sidecar Health Overview",
+    dashboardDesc: "Quickly check channel availability, failures, and recent probe results.",
+    totalChannels: "Channels",
+    healthy: "Healthy",
+    degradedRecovering: "Degraded/Recovering",
+    downDisabled: "Down/Disabled",
+    recentRuns: "Recent Runs",
+    recentRunsDesc: "Short-term trend of successful and failed probes.",
+    statusDistribution: "Status Distribution",
+    statusDistributionDesc: "Current channel state counts.",
+    modelHealth: "Model Health",
+    modelHealthDesc: "Healthy and risky channels grouped by model.",
+    operationFailed: "Operation failed",
+    fetchingChannels: "Fetching channel data from NewAPI.",
+    discoveryComplete: "Discovery complete",
+    probeComplete: "Probe complete",
+    discoveredChannelsOnly: "Found {channels} channels. No channel probes were executed.",
+    probeSummary: "Found {channels} channels, ran {total} probes, {ok} succeeded and {failed} failed.",
+    noChannelsHint: "No channels usually means the NewAPI admin API returned none, or the current admin token lacks permission.",
+  },
+} as const
+
+type MessageKey = keyof typeof messages.zh
+type Translate = (key: MessageKey) => string
+
+const navItems = [
+  { path: "/dashboard", labelKey: "navDashboard" as const, icon: LayoutDashboard },
+  { path: "/channels", labelKey: "navChannels" as const, icon: Workflow },
+  { path: "/models", labelKey: "navModels" as const, icon: Bot },
+  { path: "/events", labelKey: "navEvents" as const, icon: History },
+  { path: "/runs", labelKey: "navRuns" as const, icon: Activity },
+  { path: "/rules", labelKey: "navRules" as const, icon: SlidersHorizontal },
+  { path: "/settings", labelKey: "navSettings" as const, icon: Settings },
+]
+
+function detectLanguage(): Language {
+  const stored = window.localStorage.getItem("watchdog-language")
+  if (stored === "zh" || stored === "en") return stored
+  return navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en"
+}
+
+function storedTheme(): ThemeMode {
+  return window.localStorage.getItem("watchdog-theme") === "dark" ? "dark" : "light"
+}
+
+function formatMessage(template: string, values: Record<string, string | number>) {
+  return template.replace(/\{(\w+)\}/g, (_, key) => String(values[key] ?? ""))
+}
 
 function App() {
   const [path, setPath] = React.useState(() => normalizePath(window.location.pathname))
   const [session, setSession] = React.useState(getStoredSession)
+  const [language, setLanguage] = React.useState<Language>(detectLanguage)
+  const [theme, setTheme] = React.useState<ThemeMode>(storedTheme)
   const queryClient = useQueryClient()
+  const t = React.useCallback<Translate>((key) => messages[language][key], [language])
   const bootstrap = useQuery({ queryKey: ["bootstrap"], queryFn: api.bootstrap, refetchInterval: false })
   const status = useQuery({ queryKey: ["status"], queryFn: api.status, enabled: !!session.token })
 
@@ -183,6 +286,16 @@ function App() {
     window.addEventListener("popstate", onPop)
     return () => window.removeEventListener("popstate", onPop)
   }, [])
+
+  React.useEffect(() => {
+    window.localStorage.setItem("watchdog-language", language)
+    document.documentElement.lang = language === "zh" ? "zh-CN" : "en"
+  }, [language])
+
+  React.useEffect(() => {
+    window.localStorage.setItem("watchdog-theme", theme)
+    document.documentElement.classList.toggle("dark", theme === "dark")
+  }, [theme])
 
   function navigate(next: string) {
     window.history.pushState({}, "", next)
@@ -248,20 +361,20 @@ function App() {
       case "/settings":
         return <SettingsPage token={token} header={header} />
       default:
-        return <DashboardPage status={status.data} loading={status.isLoading} />
+        return <DashboardPage status={status.data} loading={status.isLoading} t={t} />
     }
   })()
 
   return (
     <div className="console-shell min-h-screen">
-      <aside className="fixed inset-y-0 left-0 hidden w-56 border-r border-stone-200 bg-stone-50/60 px-3 py-5 backdrop-blur-xl lg:block">
+      <aside className="fixed inset-y-0 left-0 hidden w-56 flex-col border-r border-stone-200 bg-stone-50/60 px-3 py-5 backdrop-blur-xl lg:flex">
         <div className="flex items-center gap-3 px-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-700 shadow-paper">
             <Terminal className="h-4 w-4" />
           </div>
           <div>
             <div className="text-sm font-medium text-stone-800">NewAPI Watchdog</div>
-            <div className="text-xs text-stone-500">旁路健康控制台</div>
+            <div className="text-xs text-stone-500">{t("sidebarSubtitle")}</div>
           </div>
         </div>
         <nav className="mt-8 space-y-1">
@@ -275,10 +388,19 @@ function App() {
               )}
             >
               <item.icon className={cn("h-4 w-4 transition-colors", path === item.path ? "text-stone-700" : "text-stone-400")} />
-              {item.label}
+              {t(item.labelKey)}
             </button>
           ))}
         </nav>
+        <PreferenceControls
+          className="mt-auto px-1 pt-6"
+          language={language}
+          theme={theme}
+          side="top"
+          onLanguageChange={setLanguage}
+          onThemeChange={setTheme}
+          t={t}
+        />
       </aside>
 
       <div className="lg:pl-56">
@@ -287,24 +409,24 @@ function App() {
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="min-w-0">
                 <div className="inline-flex h-9 flex-wrap items-center gap-2 rounded-full border border-stone-200 bg-white px-3 text-sm text-stone-500 shadow-paper">
-                  <span>控制台</span>
+                  <span>{t("console")}</span>
                   <ChevronRight className="h-3.5 w-3.5 text-stone-400" />
-                  <span className="text-stone-800">{navItems.find((item) => item.path === path)?.label || "总览"}</span>
+                  <span className="text-stone-800">{t(navItems.find((item) => item.path === path)?.labelKey || "navDashboard")}</span>
                 </div>
                 <h1 className="mt-2 break-words font-serif text-xl font-normal tracking-tight text-stone-900 sm:text-2xl">
                   {bootstrap.data?.title || "NewAPI Channel Watchdog"}
                 </h1>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={status.data?.dry_run ? "warning" : "success"}>{status.data?.dry_run ? "模拟运行" : "真实执行"}</Badge>
+                <Badge variant={status.data?.dry_run ? "warning" : "success"}>{status.data?.dry_run ? t("dryRun") : t("liveRun")}</Badge>
                 <Badge variant="outline">{session.username || "admin"}</Badge>
                 <Button size="sm" variant="outline" onClick={() => runMutation.mutate()} disabled={!token || runMutation.isPending}>
                   {runMutation.isPending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                  立即巡检
+                  {t("runNow")}
                 </Button>
                 <Button size="sm" variant="ghost" onClick={logout}>
                   <LogOut className="h-4 w-4" />
-                  退出
+                  {t("logout")}
                 </Button>
               </div>
             </div>
@@ -321,14 +443,22 @@ function App() {
                   )}
                 >
                   <item.icon className="h-4 w-4" />
-                  {item.label}
+                  {t(item.labelKey)}
                 </button>
               ))}
             </nav>
+        <PreferenceControls
+          className="mt-3 lg:hidden"
+          language={language}
+          theme={theme}
+          onLanguageChange={setLanguage}
+              onThemeChange={setTheme}
+              t={t}
+            />
           </div>
         </header>
         <main className="px-4 py-6 sm:px-5 lg:px-8">
-          <RunFeedback mutation={runMutation} />
+          <RunFeedback mutation={runMutation} t={t} />
           {content}
         </main>
       </div>
@@ -336,7 +466,61 @@ function App() {
   )
 }
 
-function RunFeedback({ mutation }: { mutation: UseMutationResult<RunResult, Error, void> }) {
+function PreferenceControls({
+  className,
+  language,
+  theme,
+  onLanguageChange,
+  onThemeChange,
+  t,
+  side = "bottom",
+}: {
+  className?: string
+  language: Language
+  theme: ThemeMode
+  side?: "top" | "bottom"
+  onLanguageChange: (value: Language) => void
+  onThemeChange: (value: ThemeMode) => void
+  t: Translate
+}) {
+  const languageOptions = [
+    { value: "zh", label: "中文" },
+    { value: "en", label: "English" },
+  ]
+  const themeOptions = [
+    { value: "light", label: t("themeLight") },
+    { value: "dark", label: t("themeDark") },
+  ]
+
+  return (
+    <div className={cn("flex items-center gap-2", className)}>
+      <Combobox
+        className="w-10"
+        contentClassName="w-40"
+        value={language}
+        onValueChange={(value) => onLanguageChange(value as Language)}
+        options={languageOptions}
+        searchable={false}
+        side={side}
+        ariaLabel={t("language")}
+        trigger={<Languages className="mx-auto h-4 w-4 text-stone-700" />}
+      />
+      <Combobox
+        className="w-10"
+        contentClassName="w-36"
+        value={theme}
+        onValueChange={(value) => onThemeChange(value as ThemeMode)}
+        options={themeOptions}
+        searchable={false}
+        side={side}
+        ariaLabel={t("theme")}
+        trigger={<Palette className="mx-auto h-4 w-4 text-stone-700" />}
+      />
+    </div>
+  )
+}
+
+function RunFeedback({ mutation, t = (key) => messages.zh[key] }: { mutation: UseMutationResult<RunResult, Error, void>; t?: Translate }) {
   if (mutation.isIdle) return null
   if (mutation.isPending) {
     return (
@@ -344,7 +528,7 @@ function RunFeedback({ mutation }: { mutation: UseMutationResult<RunResult, Erro
         <Card className="mb-5 border-stone-200 bg-stone-50">
           <CardContent className="flex items-center gap-3 p-5 text-sm text-stone-500">
             <RefreshCw className="h-4 w-4 animate-spin" />
-            正在向 NewAPI 拉取渠道信息。
+            {t("fetchingChannels")}
           </CardContent>
         </Card>
       </motion.div>
@@ -357,7 +541,7 @@ function RunFeedback({ mutation }: { mutation: UseMutationResult<RunResult, Erro
           <CardContent className="flex items-start gap-3 p-5 text-sm text-rose-700">
             <CircleAlert className="mt-0.5 h-4 w-4 flex-none" />
             <div>
-              <div className="font-medium">操作失败</div>
+              <div className="font-medium">{t("operationFailed")}</div>
               <div className="mt-1 break-words">{mutation.error.message}</div>
             </div>
           </CardContent>
@@ -373,13 +557,13 @@ function RunFeedback({ mutation }: { mutation: UseMutationResult<RunResult, Erro
         <CardContent className="flex items-start gap-3 p-5 text-sm text-emerald-800">
           <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none" />
           <div>
-            <div className="font-medium">{discoveryOnly ? "发现完成" : "巡检完成"}</div>
+            <div className="font-medium">{discoveryOnly ? t("discoveryComplete") : t("probeComplete")}</div>
             <div className="mt-1">
               {discoveryOnly
-                ? `发现 ${result.channels_seen} 个渠道，未执行渠道探测。`
-                : `发现 ${result.channels_seen} 个渠道，探测 ${result.probes_total} 次，成功 ${result.probes_ok} 次，失败 ${result.probes_failed} 次。`}
+                ? formatMessage(t("discoveredChannelsOnly"), { channels: result.channels_seen })
+                : formatMessage(t("probeSummary"), { channels: result.channels_seen, total: result.probes_total, ok: result.probes_ok, failed: result.probes_failed })}
             </div>
-            {result.channels_seen === 0 ? <div className="mt-1 text-emerald-700/80">没有渠道通常表示 NewAPI 管理接口没有返回渠道，或当前管理 Token 权限不够。</div> : null}
+            {result.channels_seen === 0 ? <div className="mt-1 text-emerald-700/80">{t("noChannelsHint")}</div> : null}
           </div>
         </CardContent>
       </Card>
@@ -520,13 +704,13 @@ function LoginPage({
   )
 }
 
-function DashboardPage({ status, loading }: { status?: StatusSnapshot; loading: boolean }) {
+function DashboardPage({ status, loading, t }: { status?: StatusSnapshot; loading: boolean; t: Translate }) {
   const counts = status?.summary.counts
   const cards = [
-    { label: "总渠道", value: status?.summary.total_channels ?? "-", icon: Workflow, tint: "text-stone-400" },
-    { label: "健康", value: counts?.healthy ?? 0, icon: CheckCircle2, tint: "text-emerald-600" },
-    { label: "降级/恢复", value: (counts?.degraded ?? 0) + (counts?.recovering ?? 0), icon: Gauge, tint: "text-amber-600" },
-    { label: "故障/禁用", value: (counts?.down ?? 0) + (counts?.auto_disabled ?? 0), icon: CircleAlert, tint: "text-rose-500" },
+    { label: t("totalChannels"), value: status?.summary.total_channels ?? "-", icon: Workflow, tint: "text-stone-400" },
+    { label: t("healthy"), value: counts?.healthy ?? 0, icon: CheckCircle2, tint: "text-emerald-600" },
+    { label: t("degradedRecovering"), value: (counts?.degraded ?? 0) + (counts?.recovering ?? 0), icon: Gauge, tint: "text-amber-600" },
+    { label: t("downDisabled"), value: (counts?.down ?? 0) + (counts?.auto_disabled ?? 0), icon: CircleAlert, tint: "text-rose-500" },
   ]
   const statusPie = counts
     ? Object.entries(counts).map(([name, value]) => ({ name, value }))
@@ -557,9 +741,9 @@ function DashboardPage({ status, loading }: { status?: StatusSnapshot; loading: 
     <motion.div className="space-y-6" initial="hidden" animate="show" variants={containerVariants}>
       <motion.div variants={itemVariants}>
         <PageHead
-          eyebrow="总览"
-          title="旁路健康总览"
-          description="这里展示 NewAPI 渠道和模型的当前健康面，不接管业务流量，只解释状态变化。"
+          eyebrow={t("dashboardEyebrow")}
+          title={t("dashboardTitle")}
+          description={t("dashboardDesc")}
         />
       </motion.div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -583,8 +767,8 @@ function DashboardPage({ status, loading }: { status?: StatusSnapshot; loading: 
         <motion.div variants={itemVariants}>
           <Card className="h-full transition-all duration-300 ease-out hover:shadow-lift">
             <CardHeader>
-              <CardTitle>最近巡检</CardTitle>
-              <CardDescription>成功和失败探测数量的短期走势。</CardDescription>
+              <CardTitle>{t("recentRuns")}</CardTitle>
+              <CardDescription>{t("recentRunsDesc")}</CardDescription>
             </CardHeader>
             <CardContent className="h-72 pt-0">
               <ResponsiveContainer width="100%" height="100%">
@@ -613,8 +797,8 @@ function DashboardPage({ status, loading }: { status?: StatusSnapshot; loading: 
         <motion.div variants={itemVariants}>
           <Card className="h-full transition-all duration-300 ease-out hover:shadow-lift">
             <CardHeader>
-              <CardTitle>状态分布</CardTitle>
-              <CardDescription>渠道状态机当前计数。</CardDescription>
+              <CardTitle>{t("statusDistribution")}</CardTitle>
+              <CardDescription>{t("statusDistributionDesc")}</CardDescription>
             </CardHeader>
             <CardContent className="h-72 pt-0">
               <ResponsiveContainer width="100%" height="100%">
@@ -634,8 +818,8 @@ function DashboardPage({ status, loading }: { status?: StatusSnapshot; loading: 
       <motion.div variants={itemVariants}>
         <Card className="transition-all duration-300 ease-out hover:shadow-lift">
           <CardHeader>
-            <CardTitle>模型健康面</CardTitle>
-            <CardDescription>按模型聚合的健康渠道和风险渠道。</CardDescription>
+            <CardTitle>{t("modelHealth")}</CardTitle>
+            <CardDescription>{t("modelHealthDesc")}</CardDescription>
           </CardHeader>
           <CardContent className="h-80 pt-0">
             <ResponsiveContainer width="100%" height="100%">
@@ -664,6 +848,10 @@ function channelModelNames(channel: ChannelView) {
   return Array.from(names).sort((left, right) => left.localeCompare(right))
 }
 
+function selectedProbeModel(channel: ChannelView, probeModels: Record<number, string>) {
+  return probeModels[channel.channel_id] ?? channel.probe_models?.[0] ?? ""
+}
+
 function ChannelsPage({ token, header }: ProtectedProps) {
   const queryClient = useQueryClient()
   const channels = useQuery({ queryKey: ["channels"], queryFn: api.channels })
@@ -671,20 +859,19 @@ function ChannelsPage({ token, header }: ProtectedProps) {
   const [action, setAction] = React.useState<{ type: "disable" | "enable"; channel: ChannelView } | null>(null)
   type ChannelAction = NonNullable<typeof action> | { type: "probe"; channel: ChannelView; probeModel: string }
   const toggleMutation = useMutation({
-    mutationFn: (payload: { channelID: number; enabled: boolean }) =>
-      api.setChannelProbeSettings(payload.channelID, payload.enabled, token, header),
+    mutationFn: (payload: { channelID: number; enabled: boolean; model: string }) =>
+      api.setChannelProbeSettings(payload.channelID, payload.enabled, payload.model, token, header),
     onSuccess: () => queryClient.invalidateQueries(),
   })
   const mutation = useMutation({
     mutationFn: async (payload: ChannelAction) => {
       if (payload.type === "probe") {
+        if (!payload.probeModel.trim()) throw new Error("请先选择模型")
         return api.probeChannel(
           payload.channel.channel_id,
           token,
           header,
-          payload.probeModel === UPSTREAM_MODEL_VALUE
-            ? { use_upstream_models: true }
-            : { model: payload.probeModel },
+          { model: payload.probeModel },
         )
       }
       if (payload.type === "disable") return api.disableChannel(payload.channel.channel_id, token, header)
@@ -700,46 +887,58 @@ function ChannelsPage({ token, header }: ProtectedProps) {
       {
         accessorKey: "name",
         header: "渠道（自动探测开关）",
-        cell: ({ row }) => (
-          <div className="flex items-center gap-3">
-            <Switch
-              checked={row.original.watchdog_enabled}
-              disabled={!token || toggleMutation.isPending}
-              aria-label={`${row.original.name} 自动巡检`}
-              onCheckedChange={(enabled) => toggleMutation.mutate({ channelID: row.original.channel_id, enabled })}
-            />
-            <div>
-              <div className="font-medium">{row.original.name}</div>
-              <div className="text-xs text-muted-foreground">#{row.original.channel_id} / {row.original.group_name}</div>
+        cell: ({ row }) => {
+          const channel = row.original
+          const model = selectedProbeModel(channel, probeModels)
+          return (
+            <div className="flex items-center gap-3">
+              {model ? (
+                <Switch
+                  checked={channel.watchdog_enabled}
+                  disabled={!token || toggleMutation.isPending}
+                  aria-label={`${channel.name} 自动巡检`}
+                  onCheckedChange={(enabled) => toggleMutation.mutate({ channelID: channel.channel_id, enabled, model })}
+                />
+              ) : (
+                <Button className="h-7 rounded-full px-2.5 text-xs text-stone-400" size="sm" variant="outline" disabled>
+                  请先选择模型
+                </Button>
+              )}
+              <div>
+                <div className="font-medium">{channel.name}</div>
+                <div className="text-xs text-muted-foreground">#{channel.channel_id} / {channel.group_name}</div>
+              </div>
             </div>
-          </div>
-        ),
+          )
+        },
       },
       { accessorKey: "watchdog_status", header: "状态", cell: ({ row }) => <StatusBadge status={row.original.watchdog_status} /> },
-      { accessorKey: "last_latency_ms", header: "延迟", cell: ({ row }) => ms(row.original.last_latency_ms) },
+      { accessorKey: "last_latency_ms", header: "延迟", cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{seconds(row.original.last_latency_ms)}</span> },
       {
         id: "probe_model",
         header: "探测模型",
         cell: ({ row }) => {
           const channel = row.original
-          const selected = probeModels[channel.channel_id] || UPSTREAM_MODEL_VALUE
-          const options = [
-            { value: UPSTREAM_MODEL_VALUE, label: "从上游获取模型" },
-            ...channelModelNames(channel).map((model) => ({ value: model, label: model })),
-          ]
+          const selected = selectedProbeModel(channel, probeModels)
+          const options = channelModelNames(channel).map((model) => ({ value: model, label: model }))
           return (
             <Combobox
-              className="w-56 max-w-full"
+              className="w-40 max-w-full"
+              contentClassName="w-96 max-w-[calc(100vw-2rem)]"
               value={selected}
-              onValueChange={(value) =>
+              onValueChange={(value) => {
                 setProbeModels((current) => ({
                   ...current,
                   [channel.channel_id]: value,
                 }))
-              }
+                if (channel.watchdog_enabled) {
+                  toggleMutation.mutate({ channelID: channel.channel_id, enabled: true, model: value })
+                }
+              }}
               options={options}
               placeholder="选择模型"
               searchPlaceholder="搜索模型"
+              emptyText="没有模型"
             />
           )
         },
@@ -750,7 +949,7 @@ function ChannelsPage({ token, header }: ProtectedProps) {
         id: "streak",
         header: "连续",
         cell: ({ row }) => (
-          <span className="text-xs text-muted-foreground">
+          <span className="whitespace-nowrap text-xs text-muted-foreground">
             F{row.original.consecutive_failures} / S{row.original.consecutive_successes}
           </span>
         ),
@@ -759,25 +958,28 @@ function ChannelsPage({ token, header }: ProtectedProps) {
       {
         id: "actions",
         header: "",
-        cell: ({ row }) => (
-          <div className="flex justify-end gap-2">
-            <Button
-              className="rounded-full"
-              size="sm"
-              variant="outline"
-              disabled={!token || mutation.isPending}
-              onClick={() => mutation.mutate({
-                type: "probe",
-                channel: row.original,
-                probeModel: probeModels[row.original.channel_id] || UPSTREAM_MODEL_VALUE,
-              })}
-            >
-              探测
-            </Button>
-            <Button className="rounded-full" size="sm" variant="outline" onClick={() => setAction({ type: "disable", channel: row.original })}>禁用</Button>
-            <Button className="rounded-full" size="sm" variant="outline" onClick={() => setAction({ type: "enable", channel: row.original })}>启用</Button>
-          </div>
-        ),
+        cell: ({ row }) => {
+          const selectedModel = selectedProbeModel(row.original, probeModels)
+          return (
+            <div className="flex justify-end gap-2">
+              <Button
+                className={cn("rounded-full", !selectedModel && "text-stone-400")}
+                size="sm"
+                variant="outline"
+                disabled={!token || mutation.isPending || !selectedModel}
+                onClick={() => mutation.mutate({
+                  type: "probe",
+                  channel: row.original,
+                  probeModel: selectedModel,
+                })}
+              >
+                {selectedModel ? "探测" : "请先选择模型"}
+              </Button>
+              <Button className="rounded-full" size="sm" variant="outline" onClick={() => setAction({ type: "disable", channel: row.original })}>禁用</Button>
+              <Button className="rounded-full" size="sm" variant="outline" onClick={() => setAction({ type: "enable", channel: row.original })}>启用</Button>
+            </div>
+          )
+        },
       },
     ],
     [token, toggleMutation, mutation, probeModels],
@@ -821,7 +1023,7 @@ function ModelsPage() {
       { accessorKey: "degraded", header: "降级" },
       { accessorKey: "down", header: "故障" },
       { accessorKey: "success_rate_1h", header: "1h", cell: ({ row }) => percent(row.original.success_rate_1h) },
-      { accessorKey: "avg_latency_ms", header: "均延迟", cell: ({ row }) => ms(row.original.avg_latency_ms) },
+      { accessorKey: "avg_latency_ms", header: "均延迟", cell: ({ row }) => seconds(row.original.avg_latency_ms) },
     ],
     [],
   )

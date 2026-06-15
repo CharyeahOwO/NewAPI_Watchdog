@@ -331,6 +331,9 @@ func (s *Service) processChannel(ctx context.Context, runID string, channel core
 	if models == nil {
 		models = s.modelsForProbe(channel, forceProbe)
 	}
+	if len(models) == 0 {
+		return stats, nil
+	}
 	for _, model := range models {
 		result, err := s.client.ProbeChannel(ctx, channel, model)
 		if err != nil {
@@ -445,10 +448,13 @@ func (s *Service) applyDecision(ctx context.Context, channel core.ChannelInfo, p
 
 func (s *Service) channelProbeEnabled(channelID int64) bool {
 	if s.cfg.Probe.PerChannel == nil {
-		return true
+		return false
 	}
 	target, ok := s.cfg.Probe.PerChannel[strconv.FormatInt(channelID, 10)]
-	if !ok || target.Enabled == nil {
+	if !ok || len(target.Models) == 0 {
+		return false
+	}
+	if target.Enabled == nil {
 		return true
 	}
 	return *target.Enabled
@@ -502,6 +508,11 @@ func (s *Service) modelsForProbe(channel core.ChannelInfo, forceProbe bool) []st
 		if len(target.Models) > 0 {
 			return target.Models
 		}
+		if !forceProbe {
+			return nil
+		}
+	} else if !forceProbe {
+		return nil
 	}
 	switch s.cfg.Probe.Mode {
 	case "models":

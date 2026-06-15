@@ -10,8 +10,7 @@ export function percent(value?: number | null) {
   return `${Math.round(value * 1000) / 10}%`
 }
 
-export function ms(value?: number | null) {
+export function seconds(value?: number | null) {
   if (value === null || value === undefined) return "-"
-  return `${value}ms`
+  return `${Math.round(value / 10) / 100}秒`
 }
-

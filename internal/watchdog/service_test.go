@@ -48,6 +48,7 @@ func TestRunOnceSkipsManualDisabled(t *testing.T) {
 	cfg := config.Default()
 	cfg.Policy.DryRun = false
 	cfg.Policy.FailureThreshold = 1
+	cfg.Probe.PerChannel["1"] = config.ProbeTarget{Models: []string{"test-model"}}
 	st := newWatchdogStore(t)
 	defer st.Close()
 	client := &fakeClient{
@@ -83,6 +84,7 @@ func TestRunOnceAutoDisableAndRecover(t *testing.T) {
 	cfg.Policy.FailureThreshold = 1
 	cfg.Policy.RecoveryThreshold = 1
 	cfg.Policy.RecoveryWaitSeconds = 0
+	cfg.Probe.PerChannel["2"] = config.ProbeTarget{Models: []string{"test-model"}}
 	st := newWatchdogStore(t)
 	defer st.Close()
 	client := &fakeClient{
@@ -214,6 +216,7 @@ func TestRunOnceCircuitBreaksByErrorRate(t *testing.T) {
 	cfg.Policy.FailureThreshold = 100
 	cfg.Policy.ErrorRateThreshold = 50
 	cfg.Policy.ErrorRateMinRequests = 2
+	cfg.Probe.PerChannel["5"] = config.ProbeTarget{Models: []string{"test-model"}}
 	st := newWatchdogStore(t)
 	defer st.Close()
 	client := &fakeClient{

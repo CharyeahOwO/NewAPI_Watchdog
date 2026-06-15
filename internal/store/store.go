@@ -29,6 +29,7 @@ type ChannelView struct {
 	WatchdogStatus         core.ChannelStatus `json:"watchdog_status"`
 	Models                 []string           `json:"models"`
 	TestModel              string             `json:"test_model,omitempty"`
+	ProbeModels            []string           `json:"probe_models,omitempty"`
 	GroupName              string             `json:"group_name"`
 	AutoBan                *bool              `json:"auto_ban"`
 	NewAPIDisabled         bool               `json:"newapi_disabled"`
