@@ -613,7 +613,7 @@ function ChannelsPage({ token, header }: ProtectedProps) {
     () => [
       {
         accessorKey: "name",
-        header: "渠道",
+        header: "渠道（自动探测开关）",
         cell: ({ row }) => (
           <div className="flex items-center gap-3">
             <Switch
