@@ -124,12 +124,12 @@ func Default() Config {
 			ModelQueryParam: "model",
 			PerChannel:      map[string]ProbeTarget{},
 		},
-	NewAPI: NewAPIConfig{
-		BaseURL:          "http://newapi:3000",
-		AdminTokenHeader: "Authorization",
-		AdminTokenPrefix: "Bearer",
-		AdminUserID:      "1",
-		TimeoutSeconds:   20,
+		NewAPI: NewAPIConfig{
+			BaseURL:          "http://newapi:3000",
+			AdminTokenHeader: "Authorization",
+			AdminTokenPrefix: "Bearer",
+			AdminUserID:      "1",
+			TimeoutSeconds:   20,
 			VerifySSL:        true,
 			Headers:          map[string]string{},
 			Endpoints: map[string]string{
