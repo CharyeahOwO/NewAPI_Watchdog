@@ -103,6 +103,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/channels/discover", s.discoverChannels)
 			r.Put("/channels/{channelID}/probe-settings", s.putChannelProbeSettings)
 			r.Post("/probe/run", s.runProbe)
+			r.Post("/probe/stored", s.probeStoredChannels)
 			r.Post("/channels/{channelID}/probe", s.probeChannel)
 			r.Post("/channels/{channelID}/disable", s.disableChannel)
 			r.Post("/channels/{channelID}/enable", s.enableChannel)
@@ -356,6 +357,15 @@ func (s *Server) discoverChannels(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) runProbe(w http.ResponseWriter, r *http.Request) {
 	result, err := s.service.RunOnce(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) probeStoredChannels(w http.ResponseWriter, r *http.Request) {
+	result, err := s.service.ProbeStoredChannels(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

@@ -1,4 +1,5 @@
 import * as React from "react"
+import { createPortal } from "react-dom"
 import { Check, ChevronsUpDown, Search } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -24,6 +25,14 @@ type ComboboxProps = {
   searchable?: boolean
 }
 
+type ComboboxPosition = {
+  left: number
+  top?: number
+  bottom?: number
+  minWidth: number
+  maxHeight: number
+}
+
 export function Combobox({
   value,
   onValueChange,
@@ -40,26 +49,73 @@ export function Combobox({
 }: ComboboxProps) {
   const [open, setOpen] = React.useState(false)
   const [query, setQuery] = React.useState("")
+  const [position, setPosition] = React.useState<ComboboxPosition | null>(null)
   const rootRef = React.useRef<HTMLDivElement>(null)
+  const triggerRef = React.useRef<HTMLButtonElement>(null)
+  const contentRef = React.useRef<HTMLDivElement>(null)
   const selected = options.find((option) => option.value === value)
   const normalizedQuery = query.trim().toLowerCase()
   const filtered = normalizedQuery
     ? options.filter((option) => `${option.label} ${option.value} ${option.description || ""}`.toLowerCase().includes(normalizedQuery))
     : options
 
+  function updatePosition() {
+    const rect = triggerRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const gap = 6
+    const padding = 8
+    const maxPanelHeight = 320
+    const minComfortHeight = 180
+    const below = Math.max(0, window.innerHeight - rect.bottom - gap - padding)
+    const above = Math.max(0, rect.top - gap - padding)
+    let placement = side
+    if (side === "bottom" && below < minComfortHeight && above > below) placement = "top"
+    if (side === "top" && above < minComfortHeight && below > above) placement = "bottom"
+    const availableHeight = placement === "top" ? above : below
+    const contentWidth = contentRef.current?.offsetWidth || rect.width
+    const maxLeft = window.innerWidth - Math.min(contentWidth, window.innerWidth - padding * 2) - padding
+    setPosition({
+      left: Math.max(padding, Math.min(rect.left, maxLeft)),
+      top: placement === "bottom" ? rect.bottom + gap : undefined,
+      bottom: placement === "top" ? window.innerHeight - rect.top + gap : undefined,
+      minWidth: rect.width,
+      maxHeight: Math.max(48, Math.min(maxPanelHeight, availableHeight)),
+    })
+  }
+
   React.useEffect(() => {
     function closeOnOutside(event: MouseEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node
+      if (!rootRef.current?.contains(target) && !contentRef.current?.contains(target)) {
         setOpen(false)
       }
     }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false)
+    }
     document.addEventListener("mousedown", closeOnOutside)
-    return () => document.removeEventListener("mousedown", closeOnOutside)
+    document.addEventListener("keydown", closeOnEscape)
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutside)
+      document.removeEventListener("keydown", closeOnEscape)
+    }
   }, [])
+
+  React.useLayoutEffect(() => {
+    if (!open) return
+    updatePosition()
+    window.addEventListener("resize", updatePosition)
+    window.addEventListener("scroll", updatePosition, true)
+    return () => {
+      window.removeEventListener("resize", updatePosition)
+      window.removeEventListener("scroll", updatePosition, true)
+    }
+  }, [open, side])
 
   return (
     <div ref={rootRef} className={cn("relative", className)}>
       <button
+        ref={triggerRef}
         type="button"
         role="combobox"
         aria-label={ariaLabel}
@@ -69,7 +125,14 @@ export function Combobox({
           "hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/20",
           !selected && "text-muted-foreground",
         )}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          if (open) {
+            setOpen(false)
+          } else {
+            updatePosition()
+            setOpen(true)
+          }
+        }}
       >
         {trigger || (
           <>
@@ -79,11 +142,19 @@ export function Combobox({
         )}
       </button>
 
-      {open ? (
+      {open && position ? createPortal(
         <div
+          ref={contentRef}
+          style={{
+            left: position.left,
+            top: position.top,
+            bottom: position.bottom,
+            minWidth: position.minWidth,
+            maxWidth: "calc(100vw - 16px)",
+            maxHeight: position.maxHeight,
+          }}
           className={cn(
-            "absolute left-0 z-50 min-w-full overflow-hidden rounded-xl border bg-card shadow-xl shadow-black/10",
-            side === "top" ? "bottom-[calc(100%+0.35rem)]" : "top-[calc(100%+0.35rem)]",
+            "fixed z-50 overflow-hidden rounded-xl border bg-card shadow-xl shadow-black/10",
             contentClassName,
           )}
         >
@@ -99,7 +170,7 @@ export function Combobox({
               />
             </div>
           ) : null}
-          <div className="max-h-64 overflow-auto p-1">
+          <div className="overflow-auto p-1" style={{ maxHeight: searchable ? Math.max(48, position.maxHeight - 49) : position.maxHeight }}>
             {filtered.length ? (
               filtered.map((option) => (
                 <button
@@ -127,7 +198,7 @@ export function Combobox({
             )}
           </div>
         </div>
-      ) : null}
+      , document.body) : null}
     </div>
   )
 }

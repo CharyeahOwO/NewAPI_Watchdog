@@ -71,6 +71,8 @@ export const api = {
     request<PolicyConfig>("/api/rules", { method: "PUT", body: JSON.stringify(payload) }, token, header),
   discoverChannels: (token: string, header: string) =>
     request<RunResult>("/api/channels/discover", { method: "POST" }, token, header),
+  probeStoredChannels: (token: string, header: string) =>
+    request<RunResult>("/api/probe/stored", { method: "POST" }, token, header),
   setChannelProbeSettings: (channelID: number, enabled: boolean, model: string, token: string, header: string) =>
     request<ChannelView>(`/api/channels/${channelID}/probe-settings`, { method: "PUT", body: JSON.stringify({ enabled, model }) }, token, header),
   runProbe: (token: string, header: string) =>

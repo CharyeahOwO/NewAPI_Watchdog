@@ -19,6 +19,7 @@ import {
   LayoutDashboard,
   ListFilter,
   LogOut,
+  Menu,
   Palette,
   Play,
   RefreshCw,
@@ -27,6 +28,7 @@ import {
   SlidersHorizontal,
   Terminal,
   Workflow,
+  X,
 } from "lucide-react"
 import {
   Area,
@@ -168,7 +170,7 @@ const messages = {
     navDashboard: "总览",
     navChannels: "渠道",
     navModels: "模型",
-    navEvents: "事件",
+    navEvents: "日志",
     navRuns: "巡检",
     navRules: "策略",
     navSettings: "设置",
@@ -177,6 +179,7 @@ const messages = {
     dryRun: "模拟运行",
     liveRun: "真实执行",
     runNow: "立即巡检",
+    refreshChannels: "刷新渠道",
     logout: "退出",
     language: "语言",
     theme: "主题",
@@ -196,18 +199,20 @@ const messages = {
     modelHealth: "模型健康面",
     modelHealthDesc: "按模型聚合的健康渠道和风险渠道。",
     operationFailed: "操作失败",
-    fetchingChannels: "正在向 NewAPI 拉取渠道信息。",
-    discoveryComplete: "发现完成",
+    refreshingChannels: "正在刷新渠道列表。",
+    probingChannels: "正在巡检已保存渠道。",
+    refreshComplete: "刷新完成",
     probeComplete: "巡检完成",
-    discoveredChannelsOnly: "发现 {channels} 个渠道，未执行渠道探测。",
-    probeSummary: "发现 {channels} 个渠道，探测 {total} 次，成功 {ok} 次，失败 {failed} 次。",
+    refreshedChannelsOnly: "发现 {channels} 个渠道，未执行渠道探测。",
+    probeSummary: "巡检 {channels} 个渠道，探测 {total} 次，成功 {ok} 次，失败 {failed} 次。",
+    probeNoWork: "巡检完成，但没有执行探测。请先为渠道选择探测模型。",
     noChannelsHint: "没有渠道通常表示 NewAPI 管理接口没有返回渠道，或当前管理 Token 权限不够。",
   },
   en: {
     navDashboard: "Dashboard",
     navChannels: "Channels",
     navModels: "Models",
-    navEvents: "Events",
+    navEvents: "Logs",
     navRuns: "Runs",
     navRules: "Rules",
     navSettings: "Settings",
@@ -216,6 +221,7 @@ const messages = {
     dryRun: "Dry run",
     liveRun: "Live run",
     runNow: "Run now",
+    refreshChannels: "Refresh channels",
     logout: "Logout",
     language: "Language",
     theme: "Theme",
@@ -235,17 +241,20 @@ const messages = {
     modelHealth: "Model Health",
     modelHealthDesc: "Healthy and risky channels grouped by model.",
     operationFailed: "Operation failed",
-    fetchingChannels: "Fetching channel data from NewAPI.",
-    discoveryComplete: "Discovery complete",
+    refreshingChannels: "Refreshing channel list.",
+    probingChannels: "Probing stored channels.",
+    refreshComplete: "Refresh complete",
     probeComplete: "Probe complete",
-    discoveredChannelsOnly: "Found {channels} channels. No channel probes were executed.",
-    probeSummary: "Found {channels} channels, ran {total} probes, {ok} succeeded and {failed} failed.",
+    refreshedChannelsOnly: "Found {channels} channels. No channel probes were executed.",
+    probeSummary: "Checked {channels} channels, ran {total} probes, {ok} succeeded and {failed} failed.",
+    probeNoWork: "Probe finished, but no probes were executed. Select a probe model for channels first.",
     noChannelsHint: "No channels usually means the NewAPI admin API returned none, or the current admin token lacks permission.",
   },
 } as const
 
 type MessageKey = keyof typeof messages.zh
 type Translate = (key: MessageKey) => string
+type HeaderOperation = "refresh" | "probe"
 
 const navItems = [
   { path: "/dashboard", labelKey: "navDashboard" as const, icon: LayoutDashboard },
@@ -276,6 +285,8 @@ function App() {
   const [session, setSession] = React.useState(getStoredSession)
   const [language, setLanguage] = React.useState<Language>(detectLanguage)
   const [theme, setTheme] = React.useState<ThemeMode>(storedTheme)
+  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false)
+  const [activeOperation, setActiveOperation] = React.useState<HeaderOperation | null>(null)
   const queryClient = useQueryClient()
   const t = React.useCallback<Translate>((key) => messages[language][key], [language])
   const bootstrap = useQuery({ queryKey: ["bootstrap"], queryFn: api.bootstrap, refetchInterval: false })
@@ -286,6 +297,13 @@ function App() {
     window.addEventListener("popstate", onPop)
     return () => window.removeEventListener("popstate", onPop)
   }, [])
+
+  React.useEffect(() => {
+    document.body.style.overflow = mobileMenuOpen ? "hidden" : ""
+    return () => {
+      document.body.style.overflow = ""
+    }
+  }, [mobileMenuOpen])
 
   React.useEffect(() => {
     window.localStorage.setItem("watchdog-language", language)
@@ -300,6 +318,7 @@ function App() {
   function navigate(next: string) {
     window.history.pushState({}, "", next)
     setPath(normalizePath(next))
+    setMobileMenuOpen(false)
   }
 
   function saveSession(next: AuthResponse) {
@@ -315,13 +334,23 @@ function App() {
     queryClient.clear()
     window.history.pushState({}, "", "/")
     setPath("/dashboard")
+    setMobileMenuOpen(false)
   }
 
   const header = bootstrap.data?.write_token_header || "X-Watchdog-Token"
   const token = session.token
   const needsSetup = !!session.token && bootstrap.data ? !bootstrap.data.setup_completed : false
-  const runMutation = useMutation({
-    mutationFn: () => api.runProbe(token, header),
+  const refreshMutation = useMutation({
+    mutationFn: () => api.discoverChannels(token, header),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["status"] })
+      queryClient.invalidateQueries({ queryKey: ["channels"] })
+      queryClient.invalidateQueries({ queryKey: ["models"] })
+      queryClient.invalidateQueries({ queryKey: ["runs"] })
+    },
+  })
+  const probeMutation = useMutation({
+    mutationFn: () => api.probeStoredChannels(token, header),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["status"] })
       queryClient.invalidateQueries({ queryKey: ["channels"] })
@@ -330,7 +359,6 @@ function App() {
       queryClient.invalidateQueries({ queryKey: ["runs"] })
     },
   })
-
   if (!session.token) {
     return (
       <LoginPage
@@ -403,62 +431,133 @@ function App() {
         />
       </aside>
 
-      <div className="lg:pl-56">
-        <header className="sticky top-0 z-30 border-b border-stone-200 bg-[#FDFCFB]/80 backdrop-blur-xl">
-          <div className="px-4 py-3 sm:px-5 lg:px-6">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="min-w-0">
-                <div className="inline-flex h-9 flex-wrap items-center gap-2 rounded-full border border-stone-200 bg-white px-3 text-sm text-stone-500 shadow-paper">
-                  <span>{t("console")}</span>
-                  <ChevronRight className="h-3.5 w-3.5 text-stone-400" />
-                  <span className="text-stone-800">{t(navItems.find((item) => item.path === path)?.labelKey || "navDashboard")}</span>
-                </div>
-                <h1 className="mt-2 break-words font-serif text-xl font-normal tracking-tight text-stone-900 sm:text-2xl">
-                  {bootstrap.data?.title || "NewAPI Channel Watchdog"}
-                </h1>
+      {mobileMenuOpen ? (
+        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="移动端导航菜单">
+          <button
+            className="absolute inset-0 bg-stone-950/20 backdrop-blur-sm"
+            type="button"
+            aria-label="关闭菜单"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+          <motion.aside
+            initial={{ x: -24, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="relative flex h-full w-[min(78vw,18rem)] flex-col border-r border-stone-200 bg-stone-50 px-3 py-4 shadow-2xl"
+          >
+            <div className="flex items-center justify-between px-2">
+              <div>
+                <div className="text-sm font-medium text-stone-900">NewAPI Watchdog</div>
+                <div className="mt-0.5 text-xs text-stone-500">{t("sidebarSubtitle")}</div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={status.data?.dry_run ? "warning" : "success"}>{status.data?.dry_run ? t("dryRun") : t("liveRun")}</Badge>
-                <Badge variant="outline">{session.username || "admin"}</Badge>
-                <Button size="sm" variant="outline" onClick={() => runMutation.mutate()} disabled={!token || runMutation.isPending}>
-                  {runMutation.isPending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                  {t("runNow")}
-                </Button>
-                <Button size="sm" variant="ghost" onClick={logout}>
-                  <LogOut className="h-4 w-4" />
-                  {t("logout")}
-                </Button>
-              </div>
+              <Button className="h-8 w-8 rounded-xl" size="icon" variant="ghost" aria-label="关闭菜单" onClick={() => setMobileMenuOpen(false)}>
+                <X className="h-4 w-4" />
+              </Button>
             </div>
-            <nav className="mt-3 flex gap-2 overflow-x-auto pb-1 lg:hidden">
+
+            <div className="mt-7 px-2 text-xs text-stone-400">{t("console")}</div>
+            <nav className="mt-3 space-y-1">
               {navItems.map((item) => (
                 <button
                   key={item.path}
                   onClick={() => navigate(item.path)}
                   className={cn(
-                    "flex flex-none items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-all duration-300 ease-out active:scale-[0.99]",
-                    path === item.path
-                      ? "border-stone-300 bg-white text-stone-900 shadow-paper"
-                      : "border-stone-200 bg-transparent text-stone-500 hover:bg-white hover:text-stone-800",
+                    "flex h-9 w-full items-center gap-3 rounded-xl px-2.5 text-left text-sm font-medium transition-colors",
+                    path === item.path ? "bg-stone-200 text-stone-950" : "text-stone-700 hover:bg-white hover:text-stone-950",
                   )}
                 >
-                  <item.icon className="h-4 w-4" />
-                  {t(item.labelKey)}
+                  <item.icon className="h-4 w-4 shrink-0" />
+                  <span className="truncate">{t(item.labelKey)}</span>
                 </button>
               ))}
             </nav>
-        <PreferenceControls
-          className="mt-3 lg:hidden"
-          language={language}
-          theme={theme}
-          onLanguageChange={setLanguage}
-              onThemeChange={setTheme}
-              t={t}
-            />
+
+            <div className="mt-auto border-t border-stone-200 px-2 pt-4">
+              <div className="mb-3 text-xs text-stone-400">{session.username || "admin"}</div>
+              <PreferenceControls
+                className="mb-3"
+                language={language}
+                theme={theme}
+                side="top"
+                onLanguageChange={setLanguage}
+                onThemeChange={setTheme}
+                t={t}
+              />
+              <button
+                type="button"
+                onClick={logout}
+                className="flex h-9 w-full items-center gap-3 rounded-xl px-2.5 text-left text-sm font-medium text-stone-700 hover:bg-white hover:text-stone-950"
+              >
+                <LogOut className="h-4 w-4 shrink-0" />
+                {t("logout")}
+              </button>
+            </div>
+          </motion.aside>
+        </div>
+      ) : null}
+
+      <div className="lg:pl-56">
+        <header className="sticky top-0 z-30 border-b border-stone-200 bg-[#FDFCFB]/80 backdrop-blur-xl">
+          <div className="px-4 py-3 sm:px-5 lg:px-6">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex min-w-0 items-start gap-3">
+                <Button
+                  className="mt-0.5 h-9 w-9 shrink-0 rounded-xl lg:hidden"
+                  size="icon"
+                  variant="outline"
+                  aria-label="打开菜单"
+                  onClick={() => setMobileMenuOpen(true)}
+                >
+                  <Menu className="h-4 w-4" />
+                </Button>
+                <div className="min-w-0">
+                  <div className="inline-flex h-9 max-w-full flex-wrap items-center gap-2 rounded-full border border-stone-200 bg-white px-3 text-sm text-stone-500 shadow-paper">
+                    <span>{t("console")}</span>
+                    <ChevronRight className="h-3.5 w-3.5 text-stone-400" />
+                    <span className="truncate text-stone-800">{t(navItems.find((item) => item.path === path)?.labelKey || "navDashboard")}</span>
+                  </div>
+                  <h1 className="mt-2 break-words font-serif text-xl font-normal tracking-tight text-stone-900 sm:text-2xl">
+                    {bootstrap.data?.title || "NewAPI Channel Watchdog"}
+                  </h1>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={status.data?.dry_run ? "warning" : "success"}>{status.data?.dry_run ? t("dryRun") : t("liveRun")}</Badge>
+                <Badge variant="outline">{session.username || "admin"}</Badge>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setActiveOperation("refresh")
+                    refreshMutation.mutate()
+                  }}
+                  disabled={!token || refreshMutation.isPending || probeMutation.isPending}
+                >
+                  <RefreshCw className={cn("h-4 w-4", refreshMutation.isPending && "animate-spin")} />
+                  {t("refreshChannels")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setActiveOperation("probe")
+                    probeMutation.mutate()
+                  }}
+                  disabled={!token || refreshMutation.isPending || probeMutation.isPending}
+                >
+                  {probeMutation.isPending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                  {t("runNow")}
+                </Button>
+                <Button className="hidden lg:inline-flex" size="sm" variant="ghost" onClick={logout}>
+                  <LogOut className="h-4 w-4" />
+                  {t("logout")}
+                </Button>
+              </div>
+            </div>
           </div>
         </header>
         <main className="px-4 py-6 sm:px-5 lg:px-8">
-          <RunFeedback mutation={runMutation} t={t} />
+          {activeOperation ? <RunFeedback operation={activeOperation} mutation={activeOperation === "refresh" ? refreshMutation : probeMutation} t={t} /> : null}
           {content}
         </main>
       </div>
@@ -520,7 +619,15 @@ function PreferenceControls({
   )
 }
 
-function RunFeedback({ mutation, t = (key) => messages.zh[key] }: { mutation: UseMutationResult<RunResult, Error, void>; t?: Translate }) {
+function RunFeedback({
+  operation,
+  mutation,
+  t = (key) => messages.zh[key],
+}: {
+  operation: HeaderOperation
+  mutation: UseMutationResult<RunResult, Error, void>
+  t?: Translate
+}) {
   if (mutation.isIdle) return null
   if (mutation.isPending) {
     return (
@@ -528,7 +635,7 @@ function RunFeedback({ mutation, t = (key) => messages.zh[key] }: { mutation: Us
         <Card className="mb-5 border-stone-200 bg-stone-50">
           <CardContent className="flex items-center gap-3 p-5 text-sm text-stone-500">
             <RefreshCw className="h-4 w-4 animate-spin" />
-            {t("fetchingChannels")}
+            {t(operation === "refresh" ? "refreshingChannels" : "probingChannels")}
           </CardContent>
         </Card>
       </motion.div>
@@ -550,18 +657,20 @@ function RunFeedback({ mutation, t = (key) => messages.zh[key] }: { mutation: Us
     )
   }
   const result = mutation.data
-  const discoveryOnly = result.probes_total === 0 && result.actions_taken === 0
+  const probeNoWork = operation === "probe" && result.probes_total === 0 && result.actions_taken === 0
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: "easeOut" }}>
       <Card className="mb-5 border-emerald-200 bg-emerald-50/60">
         <CardContent className="flex items-start gap-3 p-5 text-sm text-emerald-800">
           <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none" />
           <div>
-            <div className="font-medium">{discoveryOnly ? t("discoveryComplete") : t("probeComplete")}</div>
+            <div className="font-medium">{operation === "refresh" ? t("refreshComplete") : t("probeComplete")}</div>
             <div className="mt-1">
-              {discoveryOnly
-                ? formatMessage(t("discoveredChannelsOnly"), { channels: result.channels_seen })
-                : formatMessage(t("probeSummary"), { channels: result.channels_seen, total: result.probes_total, ok: result.probes_ok, failed: result.probes_failed })}
+              {operation === "refresh"
+                ? formatMessage(t("refreshedChannelsOnly"), { channels: result.channels_seen })
+                : probeNoWork
+                  ? t("probeNoWork")
+                  : formatMessage(t("probeSummary"), { channels: result.channels_seen, total: result.probes_total, ok: result.probes_ok, failed: result.probes_failed })}
             </div>
             {result.channels_seen === 0 ? <div className="mt-1 text-emerald-700/80">{t("noChannelsHint")}</div> : null}
           </div>
@@ -900,9 +1009,9 @@ function ChannelsPage({ token, header }: ProtectedProps) {
                   onCheckedChange={(enabled) => toggleMutation.mutate({ channelID: channel.channel_id, enabled, model })}
                 />
               ) : (
-                <Button className="h-7 rounded-full px-2.5 text-xs text-stone-400" size="sm" variant="outline" disabled>
-                  请先选择模型
-                </Button>
+                <span title="请选择模型" aria-label="请选择模型">
+                  <Button className="h-5 w-9 rounded-full p-0" size="sm" variant="outline" disabled />
+                </span>
               )}
               <div>
                 <div className="font-medium">{channel.name}</div>
@@ -1037,59 +1146,143 @@ function ModelsPage() {
 
 function EventsPage() {
   const events = useQuery({ queryKey: ["events"], queryFn: api.events })
-  const columns = React.useMemo<ColumnDef<StatusEvent>[]>(
-    () => [
-      { accessorKey: "created_at", header: "时间", cell: ({ row }) => formatLocalDateTime(row.original.created_at) },
-      { accessorKey: "channel_id", header: "渠道" },
-      { accessorKey: "current_status", header: "状态", cell: ({ row }) => <StatusBadge status={row.original.current_status} /> },
-      { accessorKey: "action", header: "动作", cell: ({ row }) => row.original.action || "-" },
-      {
-        accessorKey: "dry_run",
-        header: "模式",
-        cell: ({ row }) => {
-          const dryRun = row.original.dry_run
-          return (
-            <Badge
-              variant={dryRun ? "warning" : "success"}
-              className="h-7 min-w-[4.75rem] justify-center gap-1.5 whitespace-nowrap rounded-full px-2.5 font-medium leading-none"
-            >
-              <span className={cn("h-1.5 w-1.5 rounded-full", dryRun ? "bg-amber-500" : "bg-emerald-500")} />
-              <span>{dryRun ? "模拟运行" : "真实执行"}</span>
-            </Badge>
-          )
-        },
-      },
-      { accessorKey: "reason", header: "原因" },
-    ],
-    [],
-  )
+  const [query, setQuery] = React.useState("")
+  const logs = React.useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    const data = events.data || []
+    if (!needle) return data
+    return data.filter((event) =>
+      [
+        event.reason,
+        event.action,
+        event.current_status,
+        event.previous_status,
+        event.channel_id == null ? "" : String(event.channel_id),
+      ].some((value) => (value || "").toLowerCase().includes(needle)),
+    )
+  }, [events.data, query])
+
   return (
     <div className="space-y-6">
-      <PageHead eyebrow="事件" title="事件记录" description="状态切换和自动动作都会在这里留下解释。" />
-      <DataTable columns={columns} data={events.data || []} searchKey="reason" searchPlaceholder="搜索原因" />
+      <PageHead eyebrow="日志" title="系统日志" description="按时间记录状态切换、手动操作和自动动作，重点看原因。" />
+      <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-paper">
+        <div className="flex flex-col gap-3 border-b border-stone-100 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative max-w-xl flex-1">
+            <ListFilter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
+            <Input className="pl-9" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索渠道、动作、状态或原因" />
+          </div>
+          <div className="text-sm text-stone-500">共 {logs.length} 条</div>
+        </div>
+        <div className="divide-y divide-stone-100">
+          {logs.map((event) => (
+            <div key={event.id} className="grid gap-3 p-4 sm:grid-cols-[9rem_1fr]">
+              <div className="text-sm text-stone-500">{formatLocalDateTime(event.created_at)}</div>
+              <div className="min-w-0 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className="rounded-full">#{event.channel_id ?? "-"}</Badge>
+                  {event.previous_status ? (
+                    <div className="flex items-center gap-1.5">
+                      <StatusBadge status={event.previous_status} />
+                      <ChevronRight className="h-3.5 w-3.5 text-stone-400" />
+                      <StatusBadge status={event.current_status} />
+                    </div>
+                  ) : (
+                    <StatusBadge status={event.current_status} />
+                  )}
+                  <Badge variant={event.dry_run ? "warning" : "success"} className="rounded-full">
+                    {event.dry_run ? "模拟运行" : "真实执行"}
+                  </Badge>
+                  {event.action ? <Badge variant="muted" className="rounded-full">{event.action}</Badge> : null}
+                </div>
+                <div className="break-words text-sm leading-6 text-stone-800">{event.reason || "无详细原因"}</div>
+              </div>
+            </div>
+          ))}
+          {!events.isLoading && logs.length === 0 ? <div className="p-6 text-sm text-stone-500">没有匹配日志。</div> : null}
+          {events.isLoading ? <div className="p-6 text-sm text-stone-500">加载中...</div> : null}
+        </div>
+      </div>
     </div>
   )
 }
 
 function RunsPage() {
   const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs })
-  const columns = React.useMemo<ColumnDef<RunView>[]>(
-    () => [
-      { accessorKey: "started_at", header: "开始时间", cell: ({ row }) => formatLocalDateTime(row.original.started_at) },
-      { id: "status", accessorFn: (row) => runStatusLabel(row.status), header: "状态" },
-      { accessorKey: "channels_seen", header: "渠道" },
-      { accessorKey: "probes_total", header: "探测" },
-      { accessorKey: "probes_ok", header: "成功" },
-      { accessorKey: "probes_failed", header: "失败" },
-      { accessorKey: "actions_taken", header: "动作" },
-      { accessorKey: "error", header: "错误", cell: ({ row }) => row.original.error || "-" },
-    ],
-    [],
-  )
+  const [query, setQuery] = React.useState("")
+  const batches = React.useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    const data = runs.data || []
+    if (!needle) return data
+    return data.filter((run) =>
+      [run.status, run.error, run.id, runStatusLabel(run.status)].some((value) => (value || "").toLowerCase().includes(needle)),
+    )
+  }, [runs.data, query])
+
   return (
     <div className="space-y-6">
-      <PageHead eyebrow="巡检" title="巡检记录" description="每一轮 watchdog 运行的范围、探测结果和动作数量。" />
-      <DataTable columns={columns} data={runs.data || []} searchKey="status" searchPlaceholder="搜索状态" />
+      <PageHead eyebrow="巡检" title="巡检批次" description="一条记录代表一次巡检任务，用来看范围、成功失败和是否触发动作。" />
+      <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-paper">
+        <div className="flex flex-col gap-3 border-b border-stone-100 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative max-w-xl flex-1">
+            <ListFilter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
+            <Input className="pl-9" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索状态、批次 ID 或错误" />
+          </div>
+          <div className="text-sm text-stone-500">共 {batches.length} 批</div>
+        </div>
+        <div className="divide-y divide-stone-100">
+          {batches.map((run) => (
+            <div key={run.id} className="grid gap-4 p-4 xl:grid-cols-[14rem_1fr]">
+              <div className="space-y-2">
+                <div className="text-sm font-medium text-stone-900">{formatLocalDateTime(run.started_at)}</div>
+                <div className="break-all text-xs text-stone-400">{run.id}</div>
+                <Badge
+                  variant={run.status === "failed" ? "destructive" : run.status === "running" ? "warning" : "success"}
+                  className="rounded-full"
+                >
+                  {runStatusLabel(run.status)}
+                </Badge>
+              </div>
+              <div className="min-w-0 space-y-3">
+                <div className="grid gap-2 sm:grid-cols-5">
+                  <RunMetric label="渠道" value={run.channels_seen} />
+                  <RunMetric label="探测" value={run.probes_total} />
+                  <RunMetric label="成功" value={run.probes_ok} tone="success" />
+                  <RunMetric label="失败" value={run.probes_failed} tone={run.probes_failed > 0 ? "danger" : "muted"} />
+                  <RunMetric label="动作" value={run.actions_taken} />
+                </div>
+                {run.error ? (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{run.error}</div>
+                ) : (
+                  <div className="text-sm text-stone-500">
+                    {run.probes_total === 0 ? "本批次只刷新了渠道，没有执行探测。" : "本批次已完成探测结果汇总。"}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+          {!runs.isLoading && batches.length === 0 ? <div className="p-6 text-sm text-stone-500">没有匹配批次。</div> : null}
+          {runs.isLoading ? <div className="p-6 text-sm text-stone-500">加载中...</div> : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RunMetric({ label, value, tone = "default" }: { label: string; value: number; tone?: "default" | "success" | "danger" | "muted" }) {
+  return (
+    <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2">
+      <div className="text-xs text-stone-500">{label}</div>
+      <div
+        className={cn(
+          "mt-1 text-lg font-medium tabular-nums",
+          tone === "success" && "text-emerald-700",
+          tone === "danger" && "text-rose-700",
+          tone === "muted" && "text-stone-400",
+          tone === "default" && "text-stone-900",
+        )}
+      >
+        {value}
+      </div>
     </div>
   )
 }
@@ -1318,7 +1511,7 @@ function SetupWizard({ token, header, username, onDone }: { token: string; heade
                     {saveMutation.isPending ? "保存中" : "下一步"}
                   </Button>
                 </div>
-                <RunFeedback mutation={runMutation} />
+                <RunFeedback operation="refresh" mutation={runMutation} />
               </div>
             ) : null}
 

@@ -14,12 +14,14 @@ type fakeClient struct {
 	channels []core.ChannelInfo
 	results  map[int64]core.ProbeResult
 	models   []string
+	discover int
 	probe    int
 	disable  int
 	enable   int
 }
 
 func (f *fakeClient) DiscoverChannels(ctx context.Context) ([]core.ChannelInfo, error) {
+	f.discover++
 	return f.channels, nil
 }
 
@@ -157,6 +159,67 @@ func TestDiscoverOnlyDoesNotProbeChannels(t *testing.T) {
 	}
 	if len(channels) != 1 || channels[0].ChannelID != 3 {
 		t.Fatalf("expected discovered channel to be stored, got %#v", channels)
+	}
+}
+
+func TestProbeStoredChannelsDoesNotDiscover(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.Probe.PerChannel["8"] = config.ProbeTarget{Models: []string{"saved-model"}}
+	st := newWatchdogStore(t)
+	defer st.Close()
+	if err := st.UpsertChannel(ctx, core.ChannelInfo{ID: 8, Name: "stored", Status: "1", Models: []string{"saved-model"}}); err != nil {
+		t.Fatal(err)
+	}
+	client := &fakeClient{
+		results: map[int64]core.ProbeResult{
+			8: {ChannelID: 8, OK: true, LatencyMS: 20, ErrorClass: core.ErrorNone},
+		},
+	}
+	service := New(cfg, st, client)
+	result, err := service.ProbeStoredChannels(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ChannelsSeen != 1 || result.ProbesTotal != 1 || client.discover != 0 || client.probe != 1 {
+		t.Fatalf("expected stored-channel probe without discovery: result=%#v discover=%d probe=%d", result, client.discover, client.probe)
+	}
+	if len(client.models) != 1 || client.models[0] != "saved-model" {
+		t.Fatalf("unexpected probed models: %#v", client.models)
+	}
+}
+
+func TestManualActionsKeepExplicitStatusInDryRun(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.Policy.DryRun = true
+	st := newWatchdogStore(t)
+	defer st.Close()
+	client := &fakeClient{
+		channels: []core.ChannelInfo{{ID: 7, Name: "manual-action", Status: "1"}},
+	}
+	service := New(cfg, st, client)
+
+	if _, err := service.ManualDisable(ctx, 7); err != nil {
+		t.Fatal(err)
+	}
+	state, err := st.RuntimeState(ctx, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Status != core.StatusManuallyDisabled {
+		t.Fatalf("expected dry-run manual disable to keep explicit status, got %s", state.Status)
+	}
+
+	if _, err := service.ManualEnable(ctx, 7); err != nil {
+		t.Fatal(err)
+	}
+	state, err = st.RuntimeState(ctx, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Status != core.StatusRecovering {
+		t.Fatalf("expected dry-run manual enable to keep explicit status, got %s", state.Status)
 	}
 }
 

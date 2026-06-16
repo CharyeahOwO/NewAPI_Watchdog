@@ -173,6 +173,48 @@ func (s *Service) DiscoverOnly(ctx context.Context) (RunResult, error) {
 	return result, s.finishRun(ctx, result)
 }
 
+func (s *Service) ProbeStoredChannels(ctx context.Context) (RunResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	runID := newRunID()
+	result := RunResult{RunID: runID, Status: "running"}
+	if err := s.store.StartRun(ctx, runID); err != nil {
+		return result, err
+	}
+
+	views, err := s.store.LatestChannels(ctx)
+	if err != nil {
+		result.Status = "failed"
+		result.Error = err.Error()
+		_ = s.finishRun(ctx, result)
+		return result, err
+	}
+	result.ChannelsSeen = len(views)
+
+	for _, view := range views {
+		stats, err := s.processChannel(ctx, runID, channelInfoFromView(view), false, nil)
+		if err != nil {
+			result.Status = "failed"
+			result.Error = err.Error()
+			_ = s.finishRun(ctx, result)
+			return result, err
+		}
+		result.ProbesTotal += stats.ProbesTotal
+		result.ProbesOK += stats.ProbesOK
+		result.ProbesFailed += stats.ProbesFailed
+		result.ActionsTaken += stats.ActionsTaken
+	}
+	if err := s.store.RebuildModelSnapshots(ctx); err != nil {
+		result.Status = "failed"
+		result.Error = err.Error()
+		_ = s.finishRun(ctx, result)
+		return result, err
+	}
+	result.Status = "ok"
+	return result, s.finishRun(ctx, result)
+}
+
 func (s *Service) ProbeChannel(ctx context.Context, channelID int64) (RunResult, error) {
 	return s.probeChannel(ctx, channelID, nil)
 }
@@ -240,9 +282,6 @@ func (s *Service) ManualDisable(ctx context.Context, channelID int64) (core.Acti
 		return result, err
 	}
 	status := core.StatusManuallyDisabled
-	if result.DryRun {
-		status = core.StatusUnknown
-	}
 	if err := s.store.SetChannelState(ctx, store.StateUpdate{
 		ChannelID:              channelID,
 		Status:                 status,
@@ -277,9 +316,6 @@ func (s *Service) ManualEnable(ctx context.Context, channelID int64) (core.Actio
 		return result, err
 	}
 	status := core.StatusRecovering
-	if result.DryRun {
-		status = core.StatusUnknown
-	}
 	if err := s.store.SetChannelState(ctx, store.StateUpdate{
 		ChannelID:              channelID,
 		Status:                 status,
@@ -535,6 +571,19 @@ func upstreamModels(channel core.ChannelInfo) []string {
 		return []string{channel.TestModel}
 	}
 	return []string{""}
+}
+
+func channelInfoFromView(view store.ChannelView) core.ChannelInfo {
+	return core.ChannelInfo{
+		ID:        view.ChannelID,
+		Name:      view.Name,
+		Type:      view.Type,
+		Status:    view.NewAPIStatus,
+		Models:    view.Models,
+		TestModel: view.TestModel,
+		Group:     view.GroupName,
+		AutoBan:   view.AutoBan,
+	}
 }
 
 func (s *Service) findChannel(ctx context.Context, channelID int64) (core.ChannelInfo, error) {
