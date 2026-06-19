@@ -10,10 +10,13 @@ import {
   type SortingState,
   useReactTable,
 } from "@tanstack/react-table"
-import { ChevronLeft, ChevronRight, Search } from "lucide-react"
+import { motion } from "framer-motion"
+import { ChevronLeft, ChevronRight, Inbox, Search } from "lucide-react"
 import { Combobox } from "@/components/ui/combobox"
 import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/empty-state"
 import { Input } from "@/components/ui/input"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
 const pageSizeOptions = [10, 20, 50, 100].map((pageSize) => ({
@@ -26,6 +29,7 @@ type DataTableProps<TData, TValue> = {
   data: TData[]
   searchKey?: string
   searchPlaceholder?: string
+  loading?: boolean
 }
 
 export function DataTable<TData, TValue>({
@@ -33,6 +37,7 @@ export function DataTable<TData, TValue>({
   data,
   searchKey,
   searchPlaceholder = "搜索",
+  loading = false,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
@@ -83,18 +88,34 @@ export function DataTable<TData, TValue>({
             ))}
           </TableHeader>
           <TableBody>
-            {table.getRowModel().rows.length ? (
-              table.getRowModel().rows.map((row) => (
-                <TableRow key={row.id} className="transition-colors hover:bg-stone-50/70">
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
+            {loading ? (
+              Array.from({ length: 6 }).map((_, rowIndex) => (
+                <TableRow key={`skeleton-${rowIndex}`}>
+                  {columns.map((_column, cellIndex) => (
+                    <TableCell key={cellIndex}>
+                      <Skeleton className="h-5 w-full max-w-[12rem]" />
+                    </TableCell>
                   ))}
                 </TableRow>
               ))
+            ) : table.getRowModel().rows.length ? (
+              table.getRowModel().rows.map((row, index) => (
+                <motion.tr
+                  key={row.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1], delay: Math.min(index, 12) * 0.03 }}
+                  className="border-b border-stone-100 transition-colors hover:bg-stone-50/70"
+                >
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
+                  ))}
+                </motion.tr>
+              ))
             ) : (
               <TableRow>
-                <TableCell colSpan={columns.length} className="h-24 text-center text-stone-400">
-                  暂无数据
+                <TableCell colSpan={columns.length} className="p-0">
+                  <EmptyState icon={Inbox} title="暂无数据" description="尚未发现任何记录，先刷新渠道或执行一次巡检。" />
                 </TableCell>
               </TableRow>
             )}

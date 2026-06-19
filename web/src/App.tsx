@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { UseMutationResult } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 import { Controller, useForm } from "react-hook-form"
-import { motion, Variants } from "framer-motion"
+import { AnimatePresence, motion } from "framer-motion"
 import CountUp from "react-countup"
 import {
   Activity,
@@ -47,6 +47,8 @@ import {
 import { z } from "zod"
 
 import { DataTable } from "@/components/data-table"
+import { EmptyState } from "@/components/empty-state"
+import { PageTransition, StaggerItem, StaggerRows, StaggerRow } from "@/components/motion"
 import { StatusBadge } from "@/components/status-badge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -62,8 +64,11 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import { actionLabel, summarizeEvent, type Severity } from "@/lib/activity"
 import { api, clearStoredSession, getStoredSession, setStoredSession } from "@/lib/api"
 import { cn, percent, seconds } from "@/lib/utils"
 import type {
@@ -170,10 +175,29 @@ const messages = {
     navDashboard: "总览",
     navChannels: "渠道",
     navModels: "模型",
+    navActivity: "活动",
     navEvents: "日志",
     navRuns: "巡检",
     navRules: "策略",
     navSettings: "设置",
+    tabEvents: "事件",
+    tabRuns: "巡检批次",
+    activityEyebrow: "活动",
+    activityTitle: "活动记录",
+    activityDesc: "渠道状态变化和巡检批次都在这里，先看事件了解发生了什么，再切到批次看任务汇总。",
+    eventsSearch: "搜索渠道、动作、状态或原因",
+    runsSearch: "搜索状态、批次 ID 或错误",
+    runRefreshOnly: "仅刷新渠道",
+    runDiscovered: "发现 {channels} 个渠道",
+    runProbed: "探测 {channels} 个渠道",
+    runOk: "成功",
+    runFailed: "失败",
+    runActions: "动作",
+    rawDetail: "原始信息",
+    eventsEmpty: "没有匹配事件",
+    eventsEmptyDesc: "调整搜索关键词，或先执行一次巡检以产生状态变更记录。",
+    runsEmpty: "没有匹配批次",
+    runsEmptyDesc: "调整搜索关键词，或点击右上角「立即巡检」启动一次新的巡检任务。",
     sidebarSubtitle: "旁路健康控制台",
     console: "控制台",
     dryRun: "模拟运行",
@@ -212,10 +236,29 @@ const messages = {
     navDashboard: "Dashboard",
     navChannels: "Channels",
     navModels: "Models",
+    navActivity: "Activity",
     navEvents: "Logs",
     navRuns: "Runs",
     navRules: "Rules",
     navSettings: "Settings",
+    tabEvents: "Events",
+    tabRuns: "Runs",
+    activityEyebrow: "Activity",
+    activityTitle: "Activity",
+    activityDesc: "Channel state changes and probe runs in one place. Start with events to see what happened, then switch to runs for task-level summaries.",
+    eventsSearch: "Search channel, action, status or reason",
+    runsSearch: "Search status, run ID or error",
+    runRefreshOnly: "Refresh only",
+    runDiscovered: "Found {channels} channels",
+    runProbed: "Probed {channels} channels",
+    runOk: "OK",
+    runFailed: "Failed",
+    runActions: "Actions",
+    rawDetail: "Raw details",
+    eventsEmpty: "No matching events",
+    eventsEmptyDesc: "Adjust the search, or run a probe first to generate state-change records.",
+    runsEmpty: "No matching runs",
+    runsEmptyDesc: "Adjust the search, or click \"Run now\" in the top-right to start a new probe run.",
     sidebarSubtitle: "Sidecar health console",
     console: "Console",
     dryRun: "Dry run",
@@ -260,8 +303,7 @@ const navItems = [
   { path: "/dashboard", labelKey: "navDashboard" as const, icon: LayoutDashboard },
   { path: "/channels", labelKey: "navChannels" as const, icon: Workflow },
   { path: "/models", labelKey: "navModels" as const, icon: Bot },
-  { path: "/events", labelKey: "navEvents" as const, icon: History },
-  { path: "/runs", labelKey: "navRuns" as const, icon: Activity },
+  { path: "/activity", labelKey: "navActivity" as const, icon: History },
   { path: "/rules", labelKey: "navRules" as const, icon: SlidersHorizontal },
   { path: "/settings", labelKey: "navSettings" as const, icon: Settings },
 ]
@@ -380,10 +422,8 @@ function App() {
         return <ChannelsPage token={token} header={header} />
       case "/models":
         return <ModelsPage />
-      case "/events":
-        return <EventsPage />
-      case "/runs":
-        return <RunsPage />
+      case "/activity":
+        return <ActivityPage t={t} />
       case "/rules":
         return <RulesPage token={token} header={header} />
       case "/settings":
@@ -558,7 +598,17 @@ function App() {
         </header>
         <main className="px-4 py-6 sm:px-5 lg:px-8">
           {activeOperation ? <RunFeedback operation={activeOperation} mutation={activeOperation === "refresh" ? refreshMutation : probeMutation} t={t} /> : null}
-          {content}
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={path}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            >
+              {content}
+            </motion.div>
+          </AnimatePresence>
         </main>
       </div>
     </div>
@@ -833,31 +883,18 @@ function DashboardPage({ status, loading, t }: { status?: StatusSnapshot; loadin
     risk: model.degraded + model.down + model.auto_disabled,
   }))
 
-  const containerVariants: Variants = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: { staggerChildren: 0.08, delayChildren: 0.05 }
-    }
-  }
-
-  const itemVariants: Variants = {
-    hidden: { opacity: 0, y: 16 },
-    show: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.22, 1, 0.36, 1] } }
-  }
-
   return (
-    <motion.div className="space-y-6" initial="hidden" animate="show" variants={containerVariants}>
-      <motion.div variants={itemVariants}>
+    <PageTransition>
+      <StaggerItem>
         <PageHead
           eyebrow={t("dashboardEyebrow")}
           title={t("dashboardTitle")}
           description={t("dashboardDesc")}
         />
-      </motion.div>
+      </StaggerItem>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {cards.map((card) => (
-          <motion.div key={card.label} variants={itemVariants}>
+          <StaggerItem key={card.label}>
             <Card className="transition-all duration-300 ease-out hover:-translate-y-0.5 hover:shadow-lift active:scale-[0.99]">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 p-6 pb-2">
                 <CardTitle className="font-sans text-sm font-medium text-stone-500">{card.label}</CardTitle>
@@ -865,22 +902,25 @@ function DashboardPage({ status, loading, t }: { status?: StatusSnapshot; loadin
               </CardHeader>
               <CardContent className="p-6 pt-0">
                 <div className="font-data text-5xl font-light tracking-tight text-stone-900">
-                  {loading ? <span className="text-stone-300">…</span> : <CountUp end={Number(card.value) || 0} duration={1.6} separator="," />}
+                  {loading ? <Skeleton className="h-12 w-20" /> : <CountUp end={Number(card.value) || 0} duration={1.6} separator="," />}
                 </div>
               </CardContent>
             </Card>
-          </motion.div>
+          </StaggerItem>
         ))}
       </div>
       <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-        <motion.div variants={itemVariants}>
+        <StaggerItem>
           <Card className="h-full transition-all duration-300 ease-out hover:shadow-lift">
             <CardHeader>
               <CardTitle>{t("recentRuns")}</CardTitle>
               <CardDescription>{t("recentRunsDesc")}</CardDescription>
             </CardHeader>
             <CardContent className="h-72 pt-0">
-              <ResponsiveContainer width="100%" height="100%">
+              {loading ? (
+                <Skeleton className="h-full w-full" />
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={runTrend}>
                   <defs>
                     <linearGradient id="fillOk" x1="0" y1="0" x2="0" y2="1">
@@ -900,17 +940,21 @@ function DashboardPage({ status, loading, t }: { status?: StatusSnapshot; loadin
                   <Area type="monotone" dataKey="failed" stackId="1" stroke="#f43f5e" strokeWidth={2} fill="url(#fillFailed)" animationDuration={900} animationEasing="ease-out" />
                 </AreaChart>
               </ResponsiveContainer>
+              )}
             </CardContent>
           </Card>
-        </motion.div>
-        <motion.div variants={itemVariants}>
+        </StaggerItem>
+        <StaggerItem>
           <Card className="h-full transition-all duration-300 ease-out hover:shadow-lift">
             <CardHeader>
               <CardTitle>{t("statusDistribution")}</CardTitle>
               <CardDescription>{t("statusDistributionDesc")}</CardDescription>
             </CardHeader>
             <CardContent className="h-72 pt-0">
-              <ResponsiveContainer width="100%" height="100%">
+              {loading ? (
+                <Skeleton className="h-full w-full" />
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie data={statusPie} dataKey="value" nameKey="name" innerRadius={58} outerRadius={88} paddingAngle={2} stroke="#ffffff" strokeWidth={2} animationDuration={900} animationEasing="ease-out">
                     {statusPie.map((_, index) => (
@@ -920,18 +964,22 @@ function DashboardPage({ status, loading, t }: { status?: StatusSnapshot; loadin
                   <Tooltip contentStyle={{ borderRadius: '12px', border: '1px solid #e7e5e4', boxShadow: '0 8px 24px -8px rgba(168, 162, 158, 0.35)' }} />
                 </PieChart>
               </ResponsiveContainer>
+              )}
             </CardContent>
           </Card>
-        </motion.div>
+        </StaggerItem>
       </div>
-      <motion.div variants={itemVariants}>
+      <StaggerItem>
         <Card className="transition-all duration-300 ease-out hover:shadow-lift">
           <CardHeader>
             <CardTitle>{t("modelHealth")}</CardTitle>
             <CardDescription>{t("modelHealthDesc")}</CardDescription>
           </CardHeader>
           <CardContent className="h-80 pt-0">
-            <ResponsiveContainer width="100%" height="100%">
+            {loading ? (
+              <Skeleton className="h-full w-full" />
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
               <BarChart data={modelBars} barGap={6}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f5f5f4" />
                 <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: '#78716c', fontSize: 12 }} />
@@ -941,10 +989,11 @@ function DashboardPage({ status, loading, t }: { status?: StatusSnapshot; loadin
                 <Bar dataKey="risk" fill="#f43f5e" radius={[4, 4, 0, 0]} animationDuration={900} animationEasing="ease-out" />
               </BarChart>
             </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
-      </motion.div>
-    </motion.div>
+      </StaggerItem>
+    </PageTransition>
   )
 }
 
@@ -1095,9 +1144,13 @@ function ChannelsPage({ token, header }: ProtectedProps) {
   )
 
   return (
-    <div className="space-y-6">
-      <PageHead eyebrow="渠道" title="渠道" description="查看渠道健康、错误和延迟，并执行手动探测、禁用、恢复操作。" />
-      <DataTable columns={columns} data={channels.data || []} searchKey="name" searchPlaceholder="搜索渠道名称" />
+    <PageTransition>
+      <StaggerItem>
+        <PageHead eyebrow="渠道" title="渠道" description="查看渠道健康、错误和延迟，并执行手动探测、禁用、恢复操作。" />
+      </StaggerItem>
+      <StaggerItem>
+        <DataTable columns={columns} data={channels.data || []} searchKey="name" searchPlaceholder="搜索渠道名称" loading={channels.isLoading} />
+      </StaggerItem>
       {toggleMutation.error ? <p className="text-sm text-destructive">{toggleMutation.error.message}</p> : null}
       {!action && mutation.error ? <p className="text-sm text-destructive">{mutation.error.message}</p> : null}
       <Dialog open={!!action} onOpenChange={(open) => !open && setAction(null)}>
@@ -1117,7 +1170,7 @@ function ChannelsPage({ token, header }: ProtectedProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageTransition>
   )
 }
 
@@ -1137,76 +1190,140 @@ function ModelsPage() {
     [],
   )
   return (
-    <div className="space-y-6">
-      <PageHead eyebrow="模型" title="模型健康" description="按模型和分组聚合渠道状态，适合判断某个模型是否还有可用通路。" />
-      <DataTable columns={columns} data={models.data || []} searchKey="model" searchPlaceholder="搜索模型" />
-    </div>
+    <PageTransition>
+      <StaggerItem>
+        <PageHead eyebrow="模型" title="模型健康" description="按模型和分组聚合渠道状态，适合判断某个模型是否还有可用通路。" />
+      </StaggerItem>
+      <StaggerItem>
+        <DataTable columns={columns} data={models.data || []} searchKey="model" searchPlaceholder="搜索模型" loading={models.isLoading} />
+      </StaggerItem>
+    </PageTransition>
   )
 }
 
-function EventsPage() {
+const severityBar: Record<Severity, string> = {
+  ok: "bg-emerald-400",
+  warn: "bg-amber-400",
+  danger: "bg-rose-400",
+  muted: "bg-stone-300",
+}
+
+function ActivityPage({ t }: { t: Translate }) {
+  return (
+    <PageTransition>
+      <StaggerItem>
+        <PageHead eyebrow={t("activityEyebrow")} title={t("activityTitle")} description={t("activityDesc")} />
+      </StaggerItem>
+      <StaggerItem>
+        <Tabs defaultValue="events">
+          <TabsList className="bg-stone-100">
+            <TabsTrigger value="events">{t("tabEvents")}</TabsTrigger>
+            <TabsTrigger value="runs">{t("tabRuns")}</TabsTrigger>
+          </TabsList>
+          <TabsContent value="events" className="mt-4">
+            <EventsTimeline t={t} />
+          </TabsContent>
+          <TabsContent value="runs" className="mt-4">
+            <RunsTimeline t={t} />
+          </TabsContent>
+        </Tabs>
+      </StaggerItem>
+    </PageTransition>
+  )
+}
+
+function EventsTimeline({ t }: { t: Translate }) {
   const events = useQuery({ queryKey: ["events"], queryFn: api.events })
   const [query, setQuery] = React.useState("")
   const logs = React.useMemo(() => {
     const needle = query.trim().toLowerCase()
     const data = events.data || []
     if (!needle) return data
-    return data.filter((event) =>
-      [
+    return data.filter((event) => {
+      const summary = summarizeEvent(event)
+      return [
         event.reason,
         event.action,
         event.current_status,
         event.previous_status,
         event.channel_id == null ? "" : String(event.channel_id),
-      ].some((value) => (value || "").toLowerCase().includes(needle)),
-    )
+        summary.title,
+        actionLabel(event.action),
+      ].some((value) => (value || "").toLowerCase().includes(needle))
+    })
   }, [events.data, query])
 
   return (
-    <div className="space-y-6">
-      <PageHead eyebrow="日志" title="系统日志" description="按时间记录状态切换、手动操作和自动动作，重点看原因。" />
-      <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-paper">
-        <div className="flex flex-col gap-3 border-b border-stone-100 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="relative max-w-xl flex-1">
-            <ListFilter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-            <Input className="pl-9" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索渠道、动作、状态或原因" />
-          </div>
-          <div className="text-sm text-stone-500">共 {logs.length} 条</div>
+    <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-paper">
+      <div className="flex flex-col gap-3 border-b border-stone-100 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative max-w-xl flex-1">
+          <ListFilter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
+          <Input className="pl-9" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("eventsSearch")} />
         </div>
+        <div className="text-sm text-stone-500">共 {logs.length} 条</div>
+      </div>
+      {events.isLoading ? (
         <div className="divide-y divide-stone-100">
-          {logs.map((event) => (
-            <div key={event.id} className="grid gap-3 p-4 sm:grid-cols-[9rem_1fr]">
-              <div className="text-sm text-stone-500">{formatLocalDateTime(event.created_at)}</div>
-              <div className="min-w-0 space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="outline" className="rounded-full">#{event.channel_id ?? "-"}</Badge>
-                  {event.previous_status ? (
-                    <div className="flex items-center gap-1.5">
-                      <StatusBadge status={event.previous_status} />
-                      <ChevronRight className="h-3.5 w-3.5 text-stone-400" />
-                      <StatusBadge status={event.current_status} />
-                    </div>
-                  ) : (
-                    <StatusBadge status={event.current_status} />
-                  )}
-                  <Badge variant={event.dry_run ? "warning" : "success"} className="rounded-full">
-                    {event.dry_run ? "模拟运行" : "真实执行"}
-                  </Badge>
-                  {event.action ? <Badge variant="muted" className="rounded-full">{event.action}</Badge> : null}
-                </div>
-                <div className="break-words text-sm leading-6 text-stone-800">{event.reason || "无详细原因"}</div>
+          {Array.from({ length: 6 }).map((_, index) => (
+            <div key={index} className="flex gap-3 p-4">
+              <Skeleton className="h-12 w-1 rounded-full" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-4 w-48" />
+                <Skeleton className="h-4 w-3/4" />
               </div>
             </div>
           ))}
-          {!events.isLoading && logs.length === 0 ? <div className="p-6 text-sm text-stone-500">没有匹配日志。</div> : null}
-          {events.isLoading ? <div className="p-6 text-sm text-stone-500">加载中...</div> : null}
         </div>
-      </div>
+      ) : logs.length === 0 ? (
+        <EmptyState icon={History} title={t("eventsEmpty")} description={t("eventsEmptyDesc")} />
+      ) : (
+        <StaggerRows className="divide-y divide-stone-100">
+          {logs.map((event) => {
+            const summary = summarizeEvent(event)
+            const action = actionLabel(event.action)
+            const statusChanged = event.previous_status && event.previous_status !== event.current_status
+            return (
+              <StaggerRow key={event.id} className="flex gap-3 p-4 transition-colors hover:bg-stone-50/70">
+                <div className={cn("mt-1 w-1 flex-none self-stretch rounded-full", severityBar[summary.severity])} />
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+                    <span className="text-sm text-stone-400">{formatLocalDateTime(event.created_at)}</span>
+                    <span className="text-sm font-medium text-stone-700">渠道 #{event.channel_id ?? "-"}</span>
+                    {action ? <span className="text-sm text-stone-500">· {action}</span> : null}
+                    <div className="flex items-center gap-1.5">
+                      {statusChanged ? (
+                        <>
+                          <StatusBadge status={event.previous_status!} />
+                          <ChevronRight className="h-3.5 w-3.5 text-stone-400" />
+                          <StatusBadge status={event.current_status} />
+                        </>
+                      ) : (
+                        <StatusBadge status={event.current_status} />
+                      )}
+                    </div>
+                  </div>
+                  <div className="break-words text-sm leading-6 text-stone-800">{summary.title}</div>
+                  {summary.detail ? (
+                    <details className="group">
+                      <summary className="cursor-pointer select-none text-xs text-stone-400 transition-colors hover:text-stone-600">
+                        {t("rawDetail")}
+                      </summary>
+                      <div className="mt-1.5 break-words rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 font-mono text-xs leading-5 text-stone-600">
+                        {summary.detail}
+                      </div>
+                    </details>
+                  ) : null}
+                </div>
+              </StaggerRow>
+            )
+          })}
+        </StaggerRows>
+      )}
     </div>
   )
 }
 
-function RunsPage() {
+function RunsTimeline({ t }: { t: Translate }) {
   const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs })
   const [query, setQuery] = React.useState("")
   const batches = React.useMemo(() => {
@@ -1219,70 +1336,77 @@ function RunsPage() {
   }, [runs.data, query])
 
   return (
-    <div className="space-y-6">
-      <PageHead eyebrow="巡检" title="巡检批次" description="一条记录代表一次巡检任务，用来看范围、成功失败和是否触发动作。" />
-      <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-paper">
-        <div className="flex flex-col gap-3 border-b border-stone-100 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="relative max-w-xl flex-1">
-            <ListFilter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-            <Input className="pl-9" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索状态、批次 ID 或错误" />
-          </div>
-          <div className="text-sm text-stone-500">共 {batches.length} 批</div>
+    <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-paper">
+      <div className="flex flex-col gap-3 border-b border-stone-100 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative max-w-xl flex-1">
+          <ListFilter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
+          <Input className="pl-9" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("runsSearch")} />
         </div>
+        <div className="text-sm text-stone-500">共 {batches.length} 批</div>
+      </div>
+      {runs.isLoading ? (
         <div className="divide-y divide-stone-100">
-          {batches.map((run) => (
-            <div key={run.id} className="grid gap-4 p-4 xl:grid-cols-[14rem_1fr]">
-              <div className="space-y-2">
-                <div className="text-sm font-medium text-stone-900">{formatLocalDateTime(run.started_at)}</div>
-                <div className="break-all text-xs text-stone-400">{run.id}</div>
-                <Badge
-                  variant={run.status === "failed" ? "destructive" : run.status === "running" ? "warning" : "success"}
-                  className="rounded-full"
-                >
-                  {runStatusLabel(run.status)}
-                </Badge>
-              </div>
-              <div className="min-w-0 space-y-3">
-                <div className="grid gap-2 sm:grid-cols-5">
-                  <RunMetric label="渠道" value={run.channels_seen} />
-                  <RunMetric label="探测" value={run.probes_total} />
-                  <RunMetric label="成功" value={run.probes_ok} tone="success" />
-                  <RunMetric label="失败" value={run.probes_failed} tone={run.probes_failed > 0 ? "danger" : "muted"} />
-                  <RunMetric label="动作" value={run.actions_taken} />
-                </div>
-                {run.error ? (
-                  <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{run.error}</div>
-                ) : (
-                  <div className="text-sm text-stone-500">
-                    {run.probes_total === 0 ? "本批次只刷新了渠道，没有执行探测。" : "本批次已完成探测结果汇总。"}
-                  </div>
-                )}
+          {Array.from({ length: 5 }).map((_, index) => (
+            <div key={index} className="flex gap-3 p-4">
+              <Skeleton className="h-10 w-1 rounded-full" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-4 w-56" />
               </div>
             </div>
           ))}
-          {!runs.isLoading && batches.length === 0 ? <div className="p-6 text-sm text-stone-500">没有匹配批次。</div> : null}
-          {runs.isLoading ? <div className="p-6 text-sm text-stone-500">加载中...</div> : null}
         </div>
-      </div>
-    </div>
-  )
-}
-
-function RunMetric({ label, value, tone = "default" }: { label: string; value: number; tone?: "default" | "success" | "danger" | "muted" }) {
-  return (
-    <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2">
-      <div className="text-xs text-stone-500">{label}</div>
-      <div
-        className={cn(
-          "mt-1 text-lg font-medium tabular-nums",
-          tone === "success" && "text-emerald-700",
-          tone === "danger" && "text-rose-700",
-          tone === "muted" && "text-stone-400",
-          tone === "default" && "text-stone-900",
-        )}
-      >
-        {value}
-      </div>
+      ) : batches.length === 0 ? (
+        <EmptyState icon={Activity} title={t("runsEmpty")} description={t("runsEmptyDesc")} />
+      ) : (
+        <StaggerRows className="divide-y divide-stone-100">
+          {batches.map((run) => {
+            const bar = run.status === "failed" || run.probes_failed > 0 ? "bg-rose-400" : run.status === "running" ? "bg-amber-400" : "bg-emerald-400"
+            const onlyRefresh = run.probes_total === 0
+            return (
+              <StaggerRow key={run.id} className="flex gap-3 p-4 transition-colors hover:bg-stone-50/70">
+                <div className={cn("mt-1 w-1 flex-none self-stretch rounded-full", bar)} />
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+                    <span className="text-sm font-medium text-stone-700">{formatLocalDateTime(run.started_at)}</span>
+                    <Badge
+                      variant={run.status === "failed" ? "destructive" : run.status === "running" ? "warning" : "success"}
+                      className="rounded-full"
+                    >
+                      {runStatusLabel(run.status)}
+                    </Badge>
+                    {onlyRefresh ? (
+                      <span className="text-sm text-stone-500">
+                        · {t("runRefreshOnly")} · {formatMessage(t("runDiscovered"), { channels: run.channels_seen })}
+                      </span>
+                    ) : (
+                      <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-stone-500">
+                        <span>· {formatMessage(t("runProbed"), { channels: run.channels_seen })}</span>
+                        <span className="text-emerald-700">{t("runOk")} {run.probes_ok}</span>
+                        <span className={cn(run.probes_failed > 0 ? "font-medium text-rose-600" : "text-stone-400")}>
+                          {t("runFailed")} {run.probes_failed}
+                        </span>
+                        <span className="text-stone-600">{t("runActions")} {run.actions_taken}</span>
+                      </span>
+                    )}
+                  </div>
+                  {run.error ? (
+                    <div className="break-words rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{run.error}</div>
+                  ) : null}
+                  <details className="group">
+                    <summary className="cursor-pointer select-none text-xs text-stone-400 transition-colors hover:text-stone-600">
+                      {t("rawDetail")}
+                    </summary>
+                    <div className="mt-1.5 break-all rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 font-mono text-xs leading-5 text-stone-600">
+                      {run.id}
+                    </div>
+                  </details>
+                </div>
+              </StaggerRow>
+            )
+          })}
+        </StaggerRows>
+      )}
     </div>
   )
 }
@@ -1305,9 +1429,12 @@ function RulesPage({ token, header }: ProtectedProps) {
     onSuccess: () => queryClient.invalidateQueries(),
   })
   return (
-    <div className="space-y-6">
-      <PageHead eyebrow="策略" title="策略配置" description="失败阈值、恢复阈值、自动动作和错误分类都在这里维护，保存后立即生效。" />
+    <PageTransition>
+      <StaggerItem>
+        <PageHead eyebrow="策略" title="策略配置" description="失败阈值、恢复阈值、自动动作和错误分类都在这里维护，保存后立即生效。" />
+      </StaggerItem>
       <form className="space-y-5" onSubmit={form.handleSubmit((values) => mutation.mutate(values))}>
+        <StaggerItem>
         <Card>
           <CardHeader>
             <CardTitle>运行策略</CardTitle>
@@ -1326,7 +1453,9 @@ function RulesPage({ token, header }: ProtectedProps) {
             <SwitchField label="探测手动禁用渠道" name="probe_manual_disabled" form={form} />
           </CardContent>
         </Card>
+        </StaggerItem>
 
+        <StaggerItem>
         <Card>
           <CardHeader>
             <CardTitle>熔断器设置</CardTitle>
@@ -1338,7 +1467,9 @@ function RulesPage({ token, header }: ProtectedProps) {
             <SettingNumberField label="最小请求数" name="error_rate_min_requests" form={form} description="计算错误率前的最小请求数" />
           </CardContent>
         </Card>
+        </StaggerItem>
 
+        <StaggerItem>
         <Card>
           <CardHeader>
             <CardTitle>错误分类</CardTitle>
@@ -1348,14 +1479,17 @@ function RulesPage({ token, header }: ProtectedProps) {
             <TextareaField label="致命错误关键词" name="fatal_error_patterns" form={form} />
           </CardContent>
         </Card>
+        </StaggerItem>
 
+        <StaggerItem>
         <div className="flex justify-end gap-2">
           <Button type="button" variant="outline" onClick={() => form.reset(defaultRulesForm)}>重置</Button>
           <Button disabled={!token || mutation.isPending}>{mutation.isPending ? "保存中" : "保存策略"}</Button>
         </div>
         {mutation.error ? <p className="text-sm text-destructive">{mutation.error.message}</p> : null}
+        </StaggerItem>
       </form>
-    </div>
+    </PageTransition>
   )
 }
 
@@ -1379,8 +1513,11 @@ function SettingsPage({ token, header }: ProtectedProps) {
     onSuccess: () => queryClient.invalidateQueries(),
   })
   return (
-    <div className="space-y-6">
-      <PageHead eyebrow="设置" title="系统设置" description="连接、探测、自动动作。" />
+    <PageTransition>
+      <StaggerItem>
+        <PageHead eyebrow="设置" title="系统设置" description="连接、探测、自动动作。" />
+      </StaggerItem>
+      <StaggerItem>
       <Card>
         <CardHeader>
           <CardTitle>连接与发现</CardTitle>
@@ -1401,7 +1538,8 @@ function SettingsPage({ token, header }: ProtectedProps) {
           </form>
         </CardContent>
       </Card>
-    </div>
+      </StaggerItem>
+    </PageTransition>
   )
 }
 
@@ -1826,6 +1964,7 @@ function parseJSON<T>(value: string, fallback: T): T {
 
 function normalizePath(path: string) {
   if (path === "/" || path === "/status") return "/dashboard"
+  if (path === "/events" || path === "/runs") return "/activity"
   if (navItems.some((item) => item.path === path)) return path
   return "/dashboard"
 }
